@@ -80,7 +80,7 @@ class _ChangingSubtitleState extends State<ChangingSubtitle> {
     return Text(
       _currentSubtitle,
       style: TextStyle(
-        color: Colors.grey[600],
+        color: Colors.white,
         fontSize: 14,
         fontWeight: FontWeight.w500,
         letterSpacing: -0.2,

@@ -9,20 +9,21 @@ import 'package:projeckt_k/widgets/subtitle_changing.dart';
 
 final Color kPrimaryColor = HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor();
 final Color bgUpcomingMuted = HSLColor.fromAHSL(
-  1.0, // alpha (100%)
-  45.0, // hue
-  0.93, // saturation (93%)
-  0.95, // lightness (95%)
+  1.0,
+  45.0,
+  0.93,
+  0.95,
 ).toColor();
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({Key? key}) : super(key: key);
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  State<HomeScreen> createState() => _HomeScreenState(); // <- no logic here
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  // --- state fields (must be inside the State class) ---
   List<Map<String, dynamic>> _bills = [];
   final SubscriptionService _subscriptionService = SubscriptionService();
   bool _isLoading = false;
@@ -30,7 +31,6 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isOnline = false;
   StreamSubscription<bool>? _connectivitySubscription;
   Timer? _updateTimer;
-
   @override
   void initState() {
     super.initState();
@@ -693,7 +693,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Icon(
-                              Icons.subscriptions,
+                              Icons.notifications,
                               color: Colors.blue[700],
                               size: 16,
                             ),
@@ -1555,244 +1555,448 @@ class _HomeScreenState extends State<HomeScreen> {
     return total;
   }
 
+  // Helper method for upcoming bills count (next 14 days)
+  int _getUpcoming14DaysCount() {
+    int count = 0;
+    final now = DateTime.now();
+    final fourteenDaysFromNow = now.add(const Duration(days: 14));
+
+    for (var bill in _bills) {
+      try {
+        final dueDate = _parseDueDate(bill);
+        if (dueDate != null) {
+          // Count bills that are due within the next 14 days and not yet paid
+          if (dueDate.isAfter(now) &&
+              dueDate.isBefore(fourteenDaysFromNow) &&
+              bill['status'] != 'paid') {
+            count++;
+          }
+        }
+      } catch (e) {
+        debugPrint('Error getting upcoming 14 days count: $e');
+      }
+    }
+    return count;
+  }
+
   @override
   Widget build(BuildContext context) {
     final authService = AuthService();
-
     return Scaffold(
-      appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(75.0), // ⬅️ taller AppBar
-        child: AppBar(
-          elevation: 0,
-          backgroundColor: Colors.white,
-          foregroundColor: kPrimaryColor,
-          titleSpacing: 16,
-          title: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: Colors.orange.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(
-                  Icons.notifications_active_rounded,
-                  color: Colors.deepOrange,
-                  size: 25,
-                ),
-              ),
-              const SizedBox(width: 10),
-
-              const SizedBox(width: 10),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'SubManager',
-                    style: TextStyle(
-                      color: kPrimaryColor,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 22,
-                    ),
-                  ),
-                  ChangingSubtitle(), // 👈 rotating subtitle
-                ],
-              ),
-            ],
-          ),
-          actions: [
-            Builder(
-              builder: (context) {
-                final user = authService.currentUser;
-                final userName = user?.displayName ?? 'User';
-                return Padding(
-                  padding: const EdgeInsets.only(right: 16.0),
-                  child: GestureDetector(
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const ProfileScreen(),
-                        ),
-                      );
-                    },
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Flexible(
-                          child: Text(
-                            userName,
-                            style: TextStyle(
-                              color: Colors.grey[700],
-                              fontWeight: FontWeight.w500,
-                              fontSize: 14,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                            maxLines: 1,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        CircleAvatar(
-                          radius: 16,
-                          backgroundColor: kPrimaryColor.withOpacity(0.1),
-                          child: Icon(
-                            Icons.person,
-                            color: kPrimaryColor,
-                            size: 18,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ],
-        ),
-      ),
-
-      body: RefreshIndicator(
-        onRefresh: _loadSubscriptions,
-        color: kPrimaryColor,
-        backgroundColor: Colors.white,
-        displacement: 40,
-        strokeWidth: 3,
-        child: Container(
+      extendBodyBehindAppBar: true,
+      extendBody: true,
+      backgroundColor: Colors.white,
+      body: SafeArea(
+        minimum: const EdgeInsets.all(16),
+        child: RefreshIndicator(
+          onRefresh: _loadSubscriptions,
           color: Colors.white,
-          child: ListView(
-            physics: const AlwaysScrollableScrollPhysics(), // 👈 important
-            children: [
-              // Total Bills Card
-              Padding(
-                padding: const EdgeInsets.only(
-                  top: 4.0,
-                  right: 16.0,
-                  left: 16.0,
-                  bottom: 12.0,
-                ),
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(20),
+          backgroundColor: Colors.transparent,
+          displacement: 40,
+          strokeWidth: 3,
+          child: Container(
+            color: Colors.white, // ✅ overall white background
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              children: [
+                // Purple Card (App Bar + Stats)
+                Container(
+                  margin: const EdgeInsets.all(0), // ✅ no margin
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
-                      colors: [kPrimaryColor, kPrimaryColor.withOpacity(0.8)],
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
+                      colors: [
+                        HSLColor.fromAHSL(
+                          1.0,
+                          236,
+                          0.89,
+                          0.85,
+                        ).toColor(), // Very light blue
+                        HSLColor.fromAHSL(
+                          1.0,
+                          236,
+                          0.89,
+                          0.75,
+                        ).toColor(), // Light blue
+                        HSLColor.fromAHSL(
+                          1.0,
+                          236,
+                          0.89,
+                          0.65,
+                        ).toColor(), // Medium blue
+                      ],
                     ),
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      // 👈 fixed spelling here
-                      BoxShadow(
-                        color: kPrimaryColor.withOpacity(0.2),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
+                    borderRadius: BorderRadius.only(
+                      bottomLeft: Radius.circular(30),
+                      bottomRight: Radius.circular(30),
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      // App Bar Section
+                      Container(
+                        padding: const EdgeInsets.only(
+                          top: 50,
+                          left: 20,
+                          right: 20,
+                          bottom: 10,
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            // App name + icon
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  child: const Icon(
+                                    Icons.subscriptions,
+                                    color: Colors.white,
+                                    size: 24,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: const [
+                                    Text(
+                                      'SubManager',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 24,
+                                      ),
+                                    ),
+                                    SizedBox(height: 2),
+                                    ChangingSubtitle(),
+                                  ],
+                                ),
+                              ],
+                            ),
+
+                            // Profile Section
+                            GestureDetector(
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const ProfileScreen(),
+                                  ),
+                                );
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.2),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Text(
+                                      authService.currentUser?.displayName ??
+                                          'User',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w500,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Container(
+                                      padding: const EdgeInsets.all(4),
+                                      decoration: const BoxDecoration(
+                                        color: Colors.white,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: Icon(
+                                        Icons.person,
+                                        color: Colors.purple,
+                                        size: 16,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      // Stats Section (inside purple card)
+                      Padding(
+                        padding: const EdgeInsets.all(25),
+                        child: Row(
+                          children: [
+                            // Monthly Summary
+                            Expanded(
+                              child: Container(
+                                height: 170, // Fixed height for consistency
+                                padding: const EdgeInsets.all(15.0),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(24),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.08),
+                                      blurRadius: 15,
+                                      offset: const Offset(0, 6),
+                                    ),
+                                  ],
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.all(8),
+                                          decoration: BoxDecoration(
+                                            color: HSLColor.fromAHSL(
+                                              1.0,
+                                              236,
+                                              0.89,
+                                              0.65,
+                                            ).toColor().withOpacity(0.1),
+                                            borderRadius: BorderRadius.circular(
+                                              12,
+                                            ),
+                                          ),
+                                          child: Icon(
+                                            Icons.attach_money,
+                                            color: HSLColor.fromAHSL(
+                                              1.0,
+                                              236,
+                                              0.89,
+                                              0.65,
+                                            ).toColor(),
+                                            size: 20,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        const Text(
+                                          "This Month",
+                                          style: TextStyle(
+                                            color: Colors.grey,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 16),
+                                    Expanded(
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            Icons.trending_up,
+                                            color: Colors.green,
+                                            size: 20,
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Text(
+                                            '\$${_calculateMonthlyTotal().toStringAsFixed(2)}',
+                                            style: const TextStyle(
+                                              fontSize: 24,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.black,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            // Upcoming Bills
+                            Expanded(
+                              child: Container(
+                                height: 170, // Fixed height for consistency
+                                padding: const EdgeInsets.all(15.0),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(24),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.08),
+                                      blurRadius: 15,
+                                      offset: const Offset(0, 6),
+                                    ),
+                                  ],
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.all(8),
+                                          decoration: BoxDecoration(
+                                            color: Colors.orange.withOpacity(
+                                              0.1,
+                                            ),
+                                            borderRadius: BorderRadius.circular(
+                                              12,
+                                            ),
+                                          ),
+                                          child: Icon(
+                                            Icons.upcoming,
+                                            color: Colors.orange,
+                                            size: 20,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        const Text(
+                                          "Next 14 Days",
+                                          style: TextStyle(
+                                            color: Colors.grey,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 16),
+                                    Expanded(
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            Icons.calendar_today,
+                                            color: Colors.orange,
+                                            size: 20,
+                                          ),
+                                          const SizedBox(
+                                            width: 10,
+                                          ), // ⬅️ adjust this value (smaller gap)
+                                          Text(
+                                            '${_getUpcoming14DaysCount()} bills',
+                                            style: const TextStyle(
+                                              fontSize: 24,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.black,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
+                ),
 
-                  child: SizedBox(
-                    height: 135,
-                    child: Center(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Total Bills This Month',
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(0.9),
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
+                // ✅ Action Buttons completely outside purple card
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 20,
+                    horizontal: 16,
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      _buildActionButton(
+                        icon: Icons.analytics,
+                        label: "Analytics",
+                        bgColor: const Color(0xFFE3F2FD),
+                        iconColor: const Color(0xFF1565C0),
+                        onTap: () {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Analytics coming soon!'),
                             ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            '\$${_calculateMonthlyTotal().toStringAsFixed(2)}',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 32,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Row(
-                            children: [
-                              Icon(
-                                _calculateMonthlyDifference() > 0
-                                    ? Icons.arrow_upward
-                                    : Icons.arrow_downward,
-                                color: Colors.white,
-                                size: 16,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                '\$${_calculateMonthlyDifference().abs().toStringAsFixed(2)} ${_calculateMonthlyDifference() > 0 ? 'more' : 'less'} than last month',
-                                style: TextStyle(
-                                  color: Colors.white.withOpacity(0.9),
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
+                          );
+                        },
                       ),
-                    ),
+                      _buildActionButton(
+                        icon: Icons.receipt_long,
+                        label: "All Bills",
+                        bgColor: const Color(0xFFE8F5E8),
+                        iconColor: const Color(0xFF2E7D32),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => AllBillsScreen()),
+                          );
+                        },
+                      ),
+                      _buildActionButton(
+                        icon: Icons.add,
+                        label: "Add Bill",
+                        bgColor: const Color(0xFFFFF3E0),
+                        iconColor: const Color(0xFFEF6C00),
+                        onTap: () => _showAddBillBottomSheet(context),
+                      ),
+                    ],
                   ),
                 ),
-              ),
-
-              // Four Cards Grid
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                child: GridView.count(
-                  physics:
-                      const NeverScrollableScrollPhysics(), // 👈 grid won't scroll separately
-                  shrinkWrap: true, // 👈 so it fits inside ListView
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  childAspectRatio: 1.2,
-                  children: [
-                    _buildAnimatedStatCard(
-                      'Upcoming',
-                      '${_getUpcomingCount()}',
-                      '\$${_getUpcomingAmount().toStringAsFixed(2)}',
-                      bgUpcomingMuted,
-                      Icons.calendar_month,
-                      const Color(0xFFD4A017),
-                    ),
-                    _buildAnimatedStatCard(
-                      'Paid',
-                      '${_getPaidCount()}',
-                      '\$${_getPaidAmount().toStringAsFixed(2)}',
-                      const Color(0xFFE8F5E9),
-                      Icons.payments_rounded,
-                      const Color(0xFF2E7D32),
-                    ),
-                    _buildAnimatedStatCard(
-                      'Overdue',
-                      '${_getOverdueCount()}',
-                      '\$${_getOverdueAmount().toStringAsFixed(2)}',
-                      const Color(0xFFFFEBEE),
-                      Icons.hourglass_top_rounded,
-                      const Color(0xFFC62828),
-                    ),
-                    _buildViewAllCard(context),
-                  ],
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          _showAddBillBottomSheet(context);
-        },
-        backgroundColor: kPrimaryColor,
-        elevation: 4,
-        child: const Icon(Icons.add, color: Colors.white, size: 18),
+    );
+  }
+
+  Widget _buildActionButton({
+    required IconData icon,
+    required String label,
+    required Color bgColor,
+    required Color iconColor,
+    required VoidCallback onTap,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: ElevatedButton(
+        onPressed: onTap,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: bgColor,
+          foregroundColor: iconColor,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          elevation: 0,
+          minimumSize: const Size(100, 100),
+          padding: EdgeInsets.zero,
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 28, color: iconColor),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 11,
+                color: iconColor,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
