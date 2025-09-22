@@ -2043,7 +2043,7 @@ class HomeScreenState extends State<HomeScreen> {
             ), // small spacing under the card
             children: [
               // Category Tabs Section
-              const SizedBox(height: 20),
+              const SizedBox(height: 10),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Column(
@@ -2057,13 +2057,19 @@ class HomeScreenState extends State<HomeScreen> {
                         color: Colors.black87,
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 10),
                     Container(
-                      height: 50,
-                      child: Scrollbar(
-                        thumbVisibility: true,
-                        thickness: 4,
-                        radius: const Radius.circular(2),
+                      height: 60,
+                      child: RawScrollbar(
+                        thumbColor: HSLColor.fromAHSL(
+                          1.0,
+                          236,
+                          0.89,
+                          0.75,
+                        ).toColor(),
+                        radius: const Radius.circular(20), // rounded corners
+                        thickness: 4, // thickness of the scrollbar
+                        thumbVisibility: true, // always show thumb
                         child: SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
                           child: Row(children: _buildCategoryTabsList()),
@@ -2232,13 +2238,12 @@ class HomeScreenState extends State<HomeScreen> {
                   end: Alignment.centerRight,
                   colors: [
                     Colors.transparent,
-                    HSLColor.fromAHSL(
-                      1.0,
-                      236,
-                      0.89,
-                      0.65,
-                    ).toColor().withOpacity(0.4),
+                    Colors.grey.shade300.withOpacity(0.6),
                   ],
+                ),
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(8),
+                  bottomLeft: Radius.circular(8),
                 ),
               ),
             ),
@@ -2654,19 +2659,42 @@ class HomeScreenState extends State<HomeScreen> {
               child: const Text('Cancel'),
             ),
             TextButton(
-              onPressed: () {
-                setState(() {
-                  _bills.removeAt(billIndex);
-                });
-                Navigator.pop(context);
+              onPressed: () async {
+                try {
+                  final bill = _bills[billIndex];
+                  final billId = bill['id'] ?? bill['firebaseId'];
 
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('$billName deleted successfully!'),
-                    backgroundColor: Colors.red,
-                    duration: const Duration(seconds: 2),
-                  ),
-                );
+                  if (billId != null) {
+                    // Delete from Firebase and local storage
+                    await _subscriptionService.deleteSubscription(billId);
+                  }
+
+                  setState(() {
+                    _bills.removeAt(billIndex);
+                  });
+                  Navigator.pop(context);
+
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('$billName deleted permanently!'),
+                      backgroundColor: Colors.red,
+                      duration: const Duration(seconds: 2),
+                    ),
+                  );
+                } catch (e) {
+                  setState(() {
+                    _bills.removeAt(billIndex);
+                  });
+                  Navigator.pop(context);
+
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('$billName deleted. Changes will sync when online.'),
+                      backgroundColor: Colors.orange,
+                      duration: const Duration(seconds: 3),
+                    ),
+                  );
+                }
               },
               style: TextButton.styleFrom(foregroundColor: Colors.red),
               child: const Text('Delete'),
