@@ -33,15 +33,32 @@ class SubscriptionService {
       subscription['id'] = docRef.id;
       subscription['firebaseId'] = docRef.id;
 
-      // Save locally as well for offline access
-      await _localStorageService?.saveSubscription(subscription);
-      await _localStorageService?.setLastSync();
+      debugPrint('Successfully added to Firebase with ID: ${docRef.id}');
 
-    } catch (e) {
+      // Save locally as well for offline access (don't throw if this fails)
+      try {
+        await _localStorageService?.saveSubscription(subscription);
+        await _localStorageService?.setLastSync();
+        debugPrint('Successfully saved locally');
+      } catch (localError) {
+        debugPrint('Local save failed but Firebase succeeded: $localError');
+        // Don't throw here since Firebase was successful
+      }
+
+    } on FirebaseException catch (e) {
       // If Firebase fails, save only locally
       debugPrint('Firebase add failed: $e. Saving locally only.');
       await _localStorageService?.saveSubscription(subscription);
       throw Exception('Offline mode: Saved locally. Will sync when online.');
+    } catch (e) {
+      // For other exceptions, check if it's a network issue
+      debugPrint('Add subscription failed: $e');
+      if (e.toString().contains('network') || e.toString().contains('connectivity') || e.toString().contains('offline')) {
+        await _localStorageService?.saveSubscription(subscription);
+        throw Exception('Offline mode: Saved locally. Will sync when online.');
+      } else {
+        rethrow;
+      }
     }
   }
 
@@ -185,12 +202,36 @@ class SubscriptionService {
       // First check network connectivity
       final connectivityResult = await Connectivity().checkConnectivity();
       if (connectivityResult == ConnectivityResult.none) {
+        debugPrint('No network connectivity detected');
         return false;
       }
 
-      // Then check Firebase connectivity
-      final timeout = const Duration(seconds: 5);
-      await _firestore.collection('users').doc(_auth.currentUser?.uid).get().timeout(timeout);
+      // Then check Firebase connectivity with multiple approaches
+      final timeout = const Duration(seconds: 3);
+
+      // Try 1: Basic Firebase connection test
+      try {
+        await _firestore.collection('connectivity_test').doc('test').get().timeout(timeout);
+      } catch (e) {
+        debugPrint('Firebase connectivity test 1 failed: $e');
+
+        // Try 2: Alternative test with user document
+        try {
+          await _firestore.collection('users').doc(_auth.currentUser?.uid).get().timeout(timeout);
+        } catch (e2) {
+          debugPrint('Firebase connectivity test 2 failed: $e2');
+
+          // Try 3: Simple ping to Firebase
+          try {
+            await _firestore.collection('ping').limit(1).get().timeout(timeout);
+          } catch (e3) {
+            debugPrint('All Firebase connectivity tests failed: $e3');
+            return false;
+          }
+        }
+      }
+
+      debugPrint('Successfully connected to Firebase');
       return true;
     } catch (e) {
       debugPrint('Network check failed: $e');

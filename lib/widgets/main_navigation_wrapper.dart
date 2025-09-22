@@ -5,9 +5,12 @@ import 'package:projeckt_k/screens/analytics_screen.dart';
 import 'package:projeckt_k/screens/add_bill_screen.dart';
 import 'package:projeckt_k/screens/profile_screen.dart';
 import 'package:projeckt_k/screens/settings_screen.dart';
+import 'package:projeckt_k/services/sync_notification_service.dart';
 
 class MainNavigationWrapper extends StatefulWidget {
-  const MainNavigationWrapper({Key? key}) : super(key: key);
+  final SyncNotificationService syncService;
+
+  const MainNavigationWrapper({Key? key, required this.syncService}) : super(key: key);
 
   @override
   State<MainNavigationWrapper> createState() => _MainNavigationWrapperState();
@@ -17,6 +20,13 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
   int _currentIndex = 0;
   final GlobalKey<HomeScreenState> _homeScreenKey =
       GlobalKey<HomeScreenState>();
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Update the sync service context when navigating
+    widget.syncService.setContext(context);
+  }
 
   late final List<Widget> _screens = [
     HomeScreen(key: _homeScreenKey),

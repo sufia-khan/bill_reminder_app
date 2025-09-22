@@ -1658,410 +1658,392 @@ class HomeScreenState extends State<HomeScreen> {
     final authService = AuthService();
 
     return Scaffold(
-      backgroundColor: Colors.white,
-      body: RefreshIndicator(
-        onRefresh: _loadSubscriptions,
-        color: Colors.white,
-        backgroundColor: Colors.transparent,
-        displacement: 40,
-        strokeWidth: 3,
-        child: SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Top Gradient AppBar + Stats Cards
-              ClipRRect(
+      // AppBar now *is* the gradient card (single container)
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(
+          290.0,
+        ), // height includes title + stats
+        child: AppBar(
+          elevation: 0,
+          backgroundColor:
+              Colors.transparent, // let flexibleSpace draw the gradient
+          automaticallyImplyLeading: false,
+          flexibleSpace: ClipRRect(
+            borderRadius: const BorderRadius.only(
+              bottomLeft: Radius.circular(30),
+              bottomRight: Radius.circular(30),
+            ),
+            child: Container(
+              // The unified gradient container (app bar + stats)
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    HSLColor.fromAHSL(
+                      1.0,
+                      236,
+                      0.89,
+                      0.65,
+                    ).toColor(), // medium vibrant blue
+                    HSLColor.fromAHSL(
+                      1.0,
+                      236,
+                      0.89,
+                      0.75,
+                    ).toColor(), // lighter blue
+                  ],
+                ),
                 borderRadius: const BorderRadius.only(
                   bottomLeft: Radius.circular(30),
                   bottomRight: Radius.circular(30),
                 ),
-                child: Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor(),
-                        HSLColor.fromAHSL(1.0, 236, 0.89, 0.75).toColor(),
-                      ],
-                    ),
-                    borderRadius: const BorderRadius.only(
-                      bottomLeft: Radius.circular(30),
-                      bottomRight: Radius.circular(30),
-                    ),
+              ),
+
+              // Use Column to stack top row (title) and stats below
+              child: SafeArea(
+                bottom: false, // we only need SafeArea for top here
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
                   ),
-                  child: SafeArea(
-                    bottom: false,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Top row: icon + title/subtitle + profile
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          // Top row: title + notifications + profile
                           Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Row(
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.all(6),
-                                    decoration: BoxDecoration(
-                                      color: Colors.orange.withOpacity(0.5),
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: const Icon(
-                                      Icons.notifications_active_rounded,
-                                      color: Colors.white,
-                                      size: 25,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      const Text(
-                                        'SubManager',
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 23,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      const ChangingSubtitle(),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                              // Profile
-                              GestureDetector(
-                                onTap: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) => const ProfileScreen(),
-                                    ),
-                                  );
-                                },
-                                child: Column(
-                                  children: [
-                                    CircleAvatar(
-                                      radius: 18,
-                                      backgroundColor: Colors.white.withOpacity(
-                                        0.9,
-                                      ),
-                                      child: Icon(
-                                        Icons.person,
-                                        color: Colors.blueAccent,
-                                        size: 18,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                  ],
+                              Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange.withOpacity(0.5),
+                                  borderRadius: BorderRadius.circular(12),
                                 ),
+                                child: const Icon(
+                                  Icons.notifications_active_rounded,
+                                  color: Colors.white,
+                                  size: 25,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'SubManager',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 23,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  const ChangingSubtitle(),
+                                ],
                               ),
                             ],
                           ),
 
-                          const SizedBox(height: 18),
-
-                          // Stats row
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 2),
-                            child: Row(
+                          // Profile (kept inside the same top row)
+                          GestureDetector(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const ProfileScreen(),
+                                ),
+                              );
+                            },
+                            child: Column(
                               children: [
-                                // This Month Card
-                                Expanded(
-                                  child: Container(
-                                    height: 175,
-                                    padding: const EdgeInsets.all(15.0),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      borderRadius: BorderRadius.circular(20),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.black.withOpacity(0.08),
-                                          blurRadius: 10,
-                                          offset: const Offset(0, 6),
-                                        ),
-                                      ],
-                                    ),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Row(
-                                          children: [
-                                            Container(
-                                              padding: const EdgeInsets.all(8),
-                                              decoration: BoxDecoration(
-                                                color: HSLColor.fromAHSL(
-                                                  1.0,
-                                                  236,
-                                                  0.89,
-                                                  0.65,
-                                                ).toColor().withOpacity(0.1),
-                                                borderRadius:
-                                                    BorderRadius.circular(12),
-                                              ),
-                                              child: Icon(
-                                                Icons.trending_up_rounded,
-                                                color: HSLColor.fromAHSL(
-                                                  1.0,
-                                                  236,
-                                                  0.89,
-                                                  0.65,
-                                                ).toColor(),
-                                                size: 20,
-                                              ),
-                                            ),
-                                            const SizedBox(width: 8),
-                                            const Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  'This',
-                                                  style: TextStyle(
-                                                    color: Colors.black87,
-                                                    fontSize: 16,
-                                                    fontWeight: FontWeight.w500,
-                                                  ),
-                                                ),
-                                                SizedBox(height: 2),
-                                                Text(
-                                                  'Month',
-                                                  style: TextStyle(
-                                                    color: Colors.black87,
-                                                    fontSize: 16,
-                                                    fontWeight: FontWeight.w500,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 16),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Row(
-                                                children: [
-                                                  Text(
-                                                    '\$${_calculateMonthlyTotal().toStringAsFixed(2)}',
-                                                    style: const TextStyle(
-                                                      fontSize: 22,
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      color: Colors.black,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                              const SizedBox(height: 12),
-                                              Row(
-                                                children: [
-                                                  Icon(
-                                                    _calculateMonthlyDifference() >
-                                                            0
-                                                        ? Icons.arrow_upward
-                                                        : Icons.trending_down,
-                                                    color:
-                                                        _calculateMonthlyDifference() >
-                                                            0
-                                                        ? Colors.red
-                                                        : Colors.green,
-                                                    size: 16,
-                                                  ),
-                                                  const SizedBox(width: 6),
-                                                  Expanded(
-                                                    child: Text.rich(
-                                                      TextSpan(
-                                                        children: [
-                                                          TextSpan(
-                                                            text:
-                                                                '\$${_calculateMonthlyDifference().abs().toStringAsFixed(2)} ',
-                                                            style:
-                                                                const TextStyle(
-                                                                  fontSize: 13,
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .bold,
-                                                                  color: Colors
-                                                                      .black87,
-                                                                ),
-                                                          ),
-                                                          TextSpan(
-                                                            text:
-                                                                _calculateMonthlyDifference() >
-                                                                    0
-                                                                ? 'more than last month'
-                                                                : 'less than last month',
-                                                            style:
-                                                                const TextStyle(
-                                                                  fontSize: 13,
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .normal,
-                                                                  color: Colors
-                                                                      .black87,
-                                                                ),
-                                                          ),
-                                                        ],
-                                                      ),
-                                                      softWrap: true,
-                                                      maxLines: 2,
-                                                      overflow:
-                                                          TextOverflow.visible,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
+                                CircleAvatar(
+                                  radius: 18,
+                                  backgroundColor: Colors.white.withOpacity(
+                                    0.9,
+                                  ),
+                                  child: Icon(
+                                    Icons.person,
+                                    color: Colors.blueAccent,
+                                    size: 18,
                                   ),
                                 ),
-
-                                const SizedBox(width: 12),
-
-                                // Next 7 Days Card
-                                Expanded(
-                                  child: Container(
-                                    height: 175,
-                                    padding: const EdgeInsets.all(15.0),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      borderRadius: BorderRadius.circular(20),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.black.withOpacity(0.08),
-                                          blurRadius: 10,
-                                          offset: const Offset(0, 6),
-                                        ),
-                                      ],
-                                    ),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Row(
-                                          children: [
-                                            Container(
-                                              padding: const EdgeInsets.all(8),
-                                              decoration: BoxDecoration(
-                                                color: Colors.orange
-                                                    .withOpacity(0.1),
-                                                borderRadius:
-                                                    BorderRadius.circular(12),
-                                              ),
-                                              child: const Icon(
-                                                Icons.upcoming,
-                                                color: Colors.orange,
-                                                size: 20,
-                                              ),
-                                            ),
-                                            const SizedBox(width: 8),
-                                            RichText(
-                                              text: const TextSpan(
-                                                children: [
-                                                  TextSpan(
-                                                    text: 'Next 7\n',
-                                                    style: TextStyle(
-                                                      color: Colors.black87,
-                                                      fontSize: 16,
-                                                      fontWeight:
-                                                          FontWeight.w500,
-                                                    ),
-                                                  ),
-                                                  TextSpan(
-                                                    text: 'Days',
-                                                    style: TextStyle(
-                                                      color: Colors.black87,
-                                                      fontSize: 16,
-                                                      fontWeight:
-                                                          FontWeight.w500,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 16),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Row(
-                                                children: [
-                                                  const Icon(
-                                                    Icons.calendar_today,
-                                                    color: Colors.orange,
-                                                    size: 20,
-                                                  ),
-                                                  const SizedBox(width: 10),
-                                                  Text(
-                                                    '${_getUpcoming7DaysCount()} bills',
-                                                    style: const TextStyle(
-                                                      fontSize: 24,
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      color: Colors.black,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                              const SizedBox(height: 8),
-                                              Row(
-                                                children: [
-                                                  const Icon(
-                                                    Icons.attach_money,
-                                                    color: Colors.orange,
-                                                    size: 16,
-                                                  ),
-                                                  const SizedBox(width: 8),
-                                                  Text(
-                                                    '\$${_getUpcoming7DaysTotal().toStringAsFixed(2)}',
-                                                    style: const TextStyle(
-                                                      fontSize: 16,
-                                                      fontWeight:
-                                                          FontWeight.w600,
-                                                      color: Colors.black87,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
+                                const SizedBox(height: 8),
+                                // Text(
+                                //   authService.currentUser?.displayName ??
+                                //       'User',
+                                //   style: TextStyle(
+                                //     color: Colors.white,
+                                //     fontWeight: FontWeight.w500,
+                                //     fontSize: 14,
+                                //   ),
+                                // ),
                               ],
                             ),
                           ),
                         ],
                       ),
-                    ),
+
+                      const SizedBox(height: 18),
+
+                      // Stats row (inside same gradient container)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 2),
+                        child: Row(
+                          children: [
+                            // This Month card
+                            // This Month card
+                            Expanded(
+                              child: Container(
+                                height: 175,
+                                padding: const EdgeInsets.all(15.0),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(20),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.08),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 6),
+                                    ),
+                                  ],
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.all(8),
+                                          decoration: BoxDecoration(
+                                            color: HSLColor.fromAHSL(
+                                              1.0,
+                                              236,
+                                              0.89,
+                                              0.65,
+                                            ).toColor().withOpacity(0.1),
+                                            borderRadius: BorderRadius.circular(
+                                              12,
+                                            ),
+                                          ),
+                                          child: Icon(
+                                            Icons.trending_up_rounded,
+                                            color: HSLColor.fromAHSL(
+                                              1.0,
+                                              236,
+                                              0.89,
+                                              0.65,
+                                            ).toColor(),
+                                            size: 20,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        const Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              'This',
+                                              style: TextStyle(
+                                                color: Colors.black87,
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                            SizedBox(height: 2),
+                                            Text(
+                                              'Month',
+                                              style: TextStyle(
+                                                color: Colors.black87,
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 16),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        mainAxisAlignment: MainAxisAlignment
+                                            .spaceEvenly, // equal spacing
+                                        children: [
+                                          Text(
+                                            '\$${_calculateMonthlyTotal().toStringAsFixed(2)}',
+                                            style: const TextStyle(
+                                              fontSize: 22,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.black,
+                                            ),
+                                          ),
+                                          Text.rich(
+                                            TextSpan(
+                                              children: [
+                                                TextSpan(
+                                                  text:
+                                                      '\$${_calculateMonthlyDifference().abs().toStringAsFixed(2)} ',
+                                                  style: const TextStyle(
+                                                    fontSize: 16,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.black87,
+                                                  ),
+                                                ),
+                                                TextSpan(
+                                                  text:
+                                                      _calculateMonthlyDifference() >
+                                                          0
+                                                      ? 'more than last month'
+                                                      : 'less than last month',
+                                                  style: const TextStyle(
+                                                    fontSize: 16,
+                                                    fontWeight:
+                                                        FontWeight.normal,
+                                                    color: Colors.black87,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            SizedBox(width: 15),
+                            // Next 7 Days card
+                            Expanded(
+                              child: Container(
+                                height: 175,
+                                padding: const EdgeInsets.all(15.0),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(20),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.08),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 6),
+                                    ),
+                                  ],
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.all(8),
+                                          decoration: BoxDecoration(
+                                            color: Colors.orange.withOpacity(
+                                              0.1,
+                                            ),
+                                            borderRadius: BorderRadius.circular(
+                                              12,
+                                            ),
+                                          ),
+                                          child: const Icon(
+                                            Icons.upcoming,
+                                            color: Colors.orange,
+                                            size: 20,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        RichText(
+                                          text: const TextSpan(
+                                            children: [
+                                              TextSpan(
+                                                text: 'Next 7\n',
+                                                style: TextStyle(
+                                                  color: Colors.black87,
+                                                  fontSize: 16,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                              ),
+                                              TextSpan(
+                                                text: 'Days',
+                                                style: TextStyle(
+                                                  color: Colors.black87,
+                                                  fontSize: 16,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 16),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        mainAxisAlignment: MainAxisAlignment
+                                            .spaceEvenly, // equal spacing
+                                        children: [
+                                          // Remove calendar icon, keep only text
+                                          Text(
+                                            '${_getUpcoming7DaysCount()} bills',
+                                            style: const TextStyle(
+                                              fontSize: 22,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.black,
+                                            ),
+                                          ),
+                                          Text(
+                                            '\$${_getUpcoming7DaysTotal().toStringAsFixed(2)}',
+                                            style: const TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.black87,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
+            ),
+          ),
+        ),
+      ),
 
-              const SizedBox(height: 20),
-
+      // No need to extend body behind appBar now
+      extendBodyBehindAppBar: false,
+      extendBody: true,
+      backgroundColor: Colors.white,
+      body: SafeArea(
+        minimum: const EdgeInsets.all(6),
+        child: RefreshIndicator(
+          onRefresh: _loadSubscriptions,
+          color: Colors.white,
+          backgroundColor: Colors.transparent,
+          displacement: 40,
+          strokeWidth: 3,
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.only(
+              top: 12,
+            ), // small spacing under the card
+            children: [
               // Category Tabs Section
+              const SizedBox(height: 20),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Column(
@@ -2091,16 +2073,12 @@ class HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
               ),
-
               const SizedBox(height: 20),
-
               // Category Content
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: _buildCategoryContent(),
               ),
-
-              const SizedBox(height: 30),
             ],
           ),
         ),
@@ -2420,7 +2398,7 @@ class HomeScreenState extends State<HomeScreen> {
       children: [
         // Category name header
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           child: Text(
             category?.name ?? 'Unknown Category',
             style: TextStyle(
@@ -4037,24 +4015,43 @@ class HomeScreenState extends State<HomeScreen> {
           );
         }
       } catch (e) {
-        // If Firebase fails, add to local list only (will sync later)
-        if (mounted) {
-          setState(() {
-            _bills.add(subscription);
-            _checkForOverdueBills(); // Immediate check for overdue status
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                '${subscription['name']} saved locally. Will sync when online.',
+        // Re-check connectivity to make sure it's actually offline
+        await _checkConnectivity();
+
+        if (!_isOnline) {
+          // Only show offline message if actually offline
+          if (mounted) {
+            setState(() {
+              _bills.add(subscription);
+              _checkForOverdueBills(); // Immediate check for overdue status
+            });
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  '${subscription['name']} saved locally. Will sync when online.',
+                ),
+                backgroundColor: Colors.orange,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
-              backgroundColor: Colors.orange,
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
+            );
+          }
+        } else {
+          // If online but Firebase failed, show error message
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Failed to save to server. Please try again.'),
+                backgroundColor: Colors.red,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
-            ),
-          );
+            );
+          }
         }
       }
     } else {
