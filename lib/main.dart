@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:projeckt_k/services/auth_service.dart';
 import 'package:projeckt_k/screens/login_screen.dart';
-import 'package:projeckt_k/screens/home_screen.dart';
+import 'package:projeckt_k/widgets/main_navigation_wrapper.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 void main() async {
@@ -57,7 +57,7 @@ class MyApp extends StatelessWidget {
       initialRoute: '/',
       routes: {
         '/': (context) => const AuthWrapper(),
-        '/home': (context) => const HomeScreen(),
+        '/home': (context) => const MainNavigationWrapper(),
       },
       onUnknownRoute: (settings) {
         return MaterialPageRoute(builder: (context) => const AuthWrapper());
@@ -77,7 +77,7 @@ class AuthWrapper extends StatelessWidget {
         if (snapshot.connectionState == ConnectionState.active) {
           final user = snapshot.data;
           if (user != null) {
-            return const HomeScreen();
+            return const MainNavigationWrapper();
           } else {
             return const LoginScreen();
           }

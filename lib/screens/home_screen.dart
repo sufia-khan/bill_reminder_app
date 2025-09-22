@@ -19,10 +19,10 @@ class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState(); // <- no logic here
+  HomeScreenState createState() => HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class HomeScreenState extends State<HomeScreen> {
   // --- state fields (must be inside the State class) ---
   List<Map<String, dynamic>> _bills = [];
   final SubscriptionService _subscriptionService = SubscriptionService();
@@ -56,6 +56,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _checkConnectivity() async {
     final isOnline = await _subscriptionService.isOnline();
+    debugPrint('Network status check: $isOnline');
     if (mounted) {
       setState(() {
         _isOnline = isOnline;
@@ -67,6 +68,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _connectivitySubscription = _subscriptionService
         .connectivityStream()
         .listen((isOnline) {
+          debugPrint('Connectivity stream update: $isOnline');
           if (mounted) {
             setState(() {
               _isOnline = isOnline;
@@ -1639,7 +1641,8 @@ class _HomeScreenState extends State<HomeScreen> {
               (dueDate.isAtSameMomentAs(sevenDaysFromNow) ||
                   dueDate.isBefore(sevenDaysFromNow)) &&
               bill['status'] != 'paid') {
-            final amount = double.tryParse(bill['amount']?.toString() ?? '0') ?? 0.0;
+            final amount =
+                double.tryParse(bill['amount']?.toString() ?? '0') ?? 0.0;
             total += amount;
           }
         }
@@ -1655,486 +1658,410 @@ class _HomeScreenState extends State<HomeScreen> {
     final authService = AuthService();
 
     return Scaffold(
-      // AppBar now *is* the gradient card (single container)
-      appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(
-          290.0,
-        ), // height includes title + stats
-        child: AppBar(
-          elevation: 0,
-          backgroundColor:
-              Colors.transparent, // let flexibleSpace draw the gradient
-          automaticallyImplyLeading: false,
-          flexibleSpace: ClipRRect(
-            borderRadius: const BorderRadius.only(
-              bottomLeft: Radius.circular(30),
-              bottomRight: Radius.circular(30),
-            ),
-            child: Container(
-              // The unified gradient container (app bar + stats)
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft, // similar direction to CSS 135deg
-                  end: Alignment.bottomRight,
-                  stops: const [0.0, 0.5, 1.0],
-                  colors: [
-                    // CSS: hsl(152 76% 36%)
-                    HSLColor.fromAHSL(1.0, 152, 0.76, 0.36).toColor(),
-
-                    // CSS: hsl(200 85% 75%)
-                    HSLColor.fromAHSL(1.0, 200, 0.85, 0.75).toColor(),
-
-                    // CSS: hsl(270 50% 75%)
-                    HSLColor.fromAHSL(1.0, 270, 0.5, 0.75).toColor(),
-                  ],
-                ),
+      backgroundColor: Colors.white,
+      body: RefreshIndicator(
+        onRefresh: _loadSubscriptions,
+        color: Colors.white,
+        backgroundColor: Colors.transparent,
+        displacement: 40,
+        strokeWidth: 3,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Top Gradient AppBar + Stats Cards
+              ClipRRect(
                 borderRadius: const BorderRadius.only(
                   bottomLeft: Radius.circular(30),
                   bottomRight: Radius.circular(30),
                 ),
-              ),
-
-              // Use Column to stack top row (title) and stats below
-              child: SafeArea(
-                bottom: false, // we only need SafeArea for top here
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor(),
+                        HSLColor.fromAHSL(1.0, 236, 0.89, 0.75).toColor(),
+                      ],
+                    ),
+                    borderRadius: const BorderRadius.only(
+                      bottomLeft: Radius.circular(30),
+                      bottomRight: Radius.circular(30),
+                    ),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // Top row: icon + title/subtitle + profile
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  child: SafeArea(
+                    bottom: false,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
+                          // Top row: title + notifications + profile
                           Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Container(
-                                padding: const EdgeInsets.all(6),
-                                decoration: BoxDecoration(
-                                  color: Colors.orange.withOpacity(0.5),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: const Icon(
-                                  Icons.notifications_active_rounded,
-                                  color: Colors.deepOrange,
-                                  size: 25,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                              Row(
                                 children: [
-                                  Text(
-                                    'SubManager',
-                                    style: TextStyle(
+                                  Container(
+                                    padding: const EdgeInsets.all(6),
+                                    decoration: BoxDecoration(
+                                      color: Colors.orange.withOpacity(0.5),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: const Icon(
+                                      Icons.notifications_active_rounded,
                                       color: Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 23,
+                                      size: 25,
                                     ),
                                   ),
-                                  const SizedBox(height: 2),
-                                  const ChangingSubtitle(),
+                                  const SizedBox(width: 12),
+                                  Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'SubManager',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 23,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      const ChangingSubtitle(),
+                                    ],
+                                  ),
                                 ],
+                              ),
+                              // Profile
+                              GestureDetector(
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => const ProfileScreen(),
+                                    ),
+                                  );
+                                },
+                                child: Column(
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 18,
+                                      backgroundColor: Colors.white.withOpacity(
+                                        0.9,
+                                      ),
+                                      child: Icon(
+                                        Icons.person,
+                                        color: Colors.blueAccent,
+                                        size: 18,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                  ],
+                                ),
                               ),
                             ],
                           ),
 
-                          // Profile (kept inside the same top row)
-                          GestureDetector(
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const ProfileScreen(),
-                                ),
-                              );
-                            },
-                            child: Column(
+                          const SizedBox(height: 18),
+
+                          // Stats row
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 2),
+                            child: Row(
                               children: [
-                                CircleAvatar(
-                                  radius: 18,
-                                  backgroundColor: Colors.white.withOpacity(
-                                    0.9,
-                                  ),
-                                  child: Icon(
-                                    Icons.person,
-                                    color: Colors.blueAccent,
-                                    size: 18,
+                                // This Month Card
+                                Expanded(
+                                  child: Container(
+                                    height: 175,
+                                    padding: const EdgeInsets.all(15.0),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(20),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.08),
+                                          blurRadius: 10,
+                                          offset: const Offset(0, 6),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Container(
+                                              padding: const EdgeInsets.all(8),
+                                              decoration: BoxDecoration(
+                                                color: HSLColor.fromAHSL(
+                                                  1.0,
+                                                  236,
+                                                  0.89,
+                                                  0.65,
+                                                ).toColor().withOpacity(0.1),
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                              ),
+                                              child: Icon(
+                                                Icons.trending_up_rounded,
+                                                color: HSLColor.fromAHSL(
+                                                  1.0,
+                                                  236,
+                                                  0.89,
+                                                  0.65,
+                                                ).toColor(),
+                                                size: 20,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            const Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  'This',
+                                                  style: TextStyle(
+                                                    color: Colors.black87,
+                                                    fontSize: 16,
+                                                    fontWeight: FontWeight.w500,
+                                                  ),
+                                                ),
+                                                SizedBox(height: 2),
+                                                Text(
+                                                  'Month',
+                                                  style: TextStyle(
+                                                    color: Colors.black87,
+                                                    fontSize: 16,
+                                                    fontWeight: FontWeight.w500,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 16),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Row(
+                                                children: [
+                                                  Text(
+                                                    '\$${_calculateMonthlyTotal().toStringAsFixed(2)}',
+                                                    style: const TextStyle(
+                                                      fontSize: 22,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      color: Colors.black,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                              const SizedBox(height: 12),
+                                              Row(
+                                                children: [
+                                                  Icon(
+                                                    _calculateMonthlyDifference() >
+                                                            0
+                                                        ? Icons.arrow_upward
+                                                        : Icons.trending_down,
+                                                    color:
+                                                        _calculateMonthlyDifference() >
+                                                            0
+                                                        ? Colors.red
+                                                        : Colors.green,
+                                                    size: 16,
+                                                  ),
+                                                  const SizedBox(width: 6),
+                                                  Expanded(
+                                                    child: Text.rich(
+                                                      TextSpan(
+                                                        children: [
+                                                          TextSpan(
+                                                            text:
+                                                                '\$${_calculateMonthlyDifference().abs().toStringAsFixed(2)} ',
+                                                            style:
+                                                                const TextStyle(
+                                                                  fontSize: 13,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .bold,
+                                                                  color: Colors
+                                                                      .black87,
+                                                                ),
+                                                          ),
+                                                          TextSpan(
+                                                            text:
+                                                                _calculateMonthlyDifference() >
+                                                                    0
+                                                                ? 'more than last month'
+                                                                : 'less than last month',
+                                                            style:
+                                                                const TextStyle(
+                                                                  fontSize: 13,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .normal,
+                                                                  color: Colors
+                                                                      .black87,
+                                                                ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                      softWrap: true,
+                                                      maxLines: 2,
+                                                      overflow:
+                                                          TextOverflow.visible,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
-                                const SizedBox(height: 8),
-                                // Text(
-                                //   authService.currentUser?.displayName ??
-                                //       'User',
-                                //   style: TextStyle(
-                                //     color: Colors.white,
-                                //     fontWeight: FontWeight.w500,
-                                //     fontSize: 14,
-                                //   ),
-                                // ),
+
+                                const SizedBox(width: 12),
+
+                                // Next 7 Days Card
+                                Expanded(
+                                  child: Container(
+                                    height: 175,
+                                    padding: const EdgeInsets.all(15.0),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(20),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.08),
+                                          blurRadius: 10,
+                                          offset: const Offset(0, 6),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Container(
+                                              padding: const EdgeInsets.all(8),
+                                              decoration: BoxDecoration(
+                                                color: Colors.orange
+                                                    .withOpacity(0.1),
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                              ),
+                                              child: const Icon(
+                                                Icons.upcoming,
+                                                color: Colors.orange,
+                                                size: 20,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            RichText(
+                                              text: const TextSpan(
+                                                children: [
+                                                  TextSpan(
+                                                    text: 'Next 7\n',
+                                                    style: TextStyle(
+                                                      color: Colors.black87,
+                                                      fontSize: 16,
+                                                      fontWeight:
+                                                          FontWeight.w500,
+                                                    ),
+                                                  ),
+                                                  TextSpan(
+                                                    text: 'Days',
+                                                    style: TextStyle(
+                                                      color: Colors.black87,
+                                                      fontSize: 16,
+                                                      fontWeight:
+                                                          FontWeight.w500,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 16),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Row(
+                                                children: [
+                                                  const Icon(
+                                                    Icons.calendar_today,
+                                                    color: Colors.orange,
+                                                    size: 20,
+                                                  ),
+                                                  const SizedBox(width: 10),
+                                                  Text(
+                                                    '${_getUpcoming7DaysCount()} bills',
+                                                    style: const TextStyle(
+                                                      fontSize: 24,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      color: Colors.black,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                              const SizedBox(height: 8),
+                                              Row(
+                                                children: [
+                                                  const Icon(
+                                                    Icons.attach_money,
+                                                    color: Colors.orange,
+                                                    size: 16,
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  Text(
+                                                    '\$${_getUpcoming7DaysTotal().toStringAsFixed(2)}',
+                                                    style: const TextStyle(
+                                                      fontSize: 16,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                      color: Colors.black87,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
                               ],
                             ),
                           ),
                         ],
                       ),
-
-                      const SizedBox(height: 18),
-
-                      // Stats row (inside same gradient container)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 2),
-                        child: Row(
-                          children: [
-                            // This Month card
-                            Expanded(
-                              child: Container(
-                                height: 175,
-                                padding: const EdgeInsets.all(15.0),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(20),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withOpacity(0.08),
-                                      blurRadius: 10,
-                                      offset: const Offset(0, 6),
-                                    ),
-                                  ],
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Container(
-                                          padding: const EdgeInsets.all(8),
-                                          decoration: BoxDecoration(
-                                            color: HSLColor.fromAHSL(
-                                              1.0,
-                                              236,
-                                              0.89,
-                                              0.65,
-                                            ).toColor().withOpacity(0.1),
-                                            borderRadius: BorderRadius.circular(
-                                              12,
-                                            ),
-                                          ),
-                                          child: Icon(
-                                            Icons.trending_up_rounded,
-                                            color: HSLColor.fromAHSL(
-                                              1.0,
-                                              236,
-                                              0.89,
-                                              0.65,
-                                            ).toColor(),
-                                            size: 20,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        const Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: const [
-                                            Text(
-                                              'Monthly',
-                                              style: TextStyle(
-                                                color: Colors.black87,
-                                                fontSize: 16,
-                                                fontWeight: FontWeight.w500,
-                                              ),
-                                            ),
-                                            SizedBox(height: 2),
-                                            Text(
-                                              'Total',
-                                              style: TextStyle(
-                                                color: Colors.black87,
-                                                fontSize: 16,
-                                                fontWeight: FontWeight.w500,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 16),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Row(
-                                            children: [
-                                              Text(
-                                                '\$${_calculateMonthlyTotal().toStringAsFixed(2)}',
-                                                style: const TextStyle(
-                                                  fontSize: 22,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: Colors.black,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                          const SizedBox(height: 12),
-                                          Container(
-                                            constraints: const BoxConstraints(
-                                              minWidth: 150,
-                                            ),
-                                            child: Row(
-                                              children: [
-                                                Icon(
-                                                  _calculateMonthlyDifference() >
-                                                          0
-                                                      ? Icons.arrow_upward
-                                                      : Icons.trending_down,
-                                                  color:
-                                                      _calculateMonthlyDifference() >
-                                                          0
-                                                      ? Colors.red
-                                                      : Colors.green,
-                                                  size: 16,
-                                                ),
-                                                const SizedBox(width: 6),
-                                                Expanded(
-                                                  child: Text.rich(
-                                                    TextSpan(
-                                                      children: [
-                                                        // Bold amount
-                                                        TextSpan(
-                                                          text:
-                                                              '\$${_calculateMonthlyDifference().abs().toStringAsFixed(2)} ',
-                                                          style:
-                                                              const TextStyle(
-                                                                fontSize: 13,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .bold,
-                                                                color: Colors
-                                                                    .black87,
-                                                              ),
-                                                        ),
-                                                        // Normal text
-                                                        TextSpan(
-                                                          text:
-                                                              _calculateMonthlyDifference() >
-                                                                  0
-                                                              ? 'more than last month'
-                                                              : 'less than last month',
-                                                          style:
-                                                              const TextStyle(
-                                                                fontSize: 13,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .normal,
-                                                                color: Colors
-                                                                    .black87,
-                                                              ),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                    softWrap: true,
-                                                    maxLines: 2,
-                                                    overflow:
-                                                        TextOverflow.visible,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-
-                            const SizedBox(width: 12),
-
-                            // Next 14 days card
-                            Expanded(
-                              child: Container(
-                                height: 175,
-                                padding: const EdgeInsets.all(15.0),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(20),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withOpacity(0.08),
-                                      blurRadius: 10,
-                                      offset: const Offset(0, 6),
-                                    ),
-                                  ],
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Container(
-                                          padding: const EdgeInsets.all(8),
-                                          decoration: BoxDecoration(
-                                            color: Colors.orange.withOpacity(
-                                              0.1,
-                                            ),
-                                            borderRadius: BorderRadius.circular(
-                                              12,
-                                            ),
-                                          ),
-                                          child: const Icon(
-                                            Icons.upcoming,
-                                            color: Colors.orange,
-                                            size: 20,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        const Text(
-                                          "Next 7 Days",
-                                          style: TextStyle(
-                                            color: Colors.grey,
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 16),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Row(
-                                            children: [
-                                              const Icon(
-                                                Icons.calendar_today,
-                                                color: Colors.orange,
-                                                size: 20,
-                                              ),
-                                              const SizedBox(width: 10),
-                                              Text(
-                                                '${_getUpcoming7DaysCount()} bills',
-                                                style: const TextStyle(
-                                                  fontSize: 24,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: Colors.black,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                          const SizedBox(height: 8),
-                                          Row(
-                                            children: [
-                                              const Icon(
-                                                Icons.attach_money,
-                                                color: Colors.orange,
-                                                size: 16,
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Text(
-                                                '\$${_getUpcoming7DaysTotal().toStringAsFixed(2)}',
-                                                style: const TextStyle(
-                                                  fontSize: 16,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: Colors.black87,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
-        ),
-      ),
 
-      // No need to extend body behind appBar now
-      extendBodyBehindAppBar: false,
-      extendBody: true,
-      backgroundColor: Colors.white,
-      body: SafeArea(
-        minimum: const EdgeInsets.all(6),
-        child: RefreshIndicator(
-          onRefresh: _loadSubscriptions,
-          color: Colors.white,
-          backgroundColor: Colors.transparent,
-          displacement: 40,
-          strokeWidth: 3,
-          child: ListView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.only(
-              top: 12,
-            ), // small spacing under the card
-            children: [
-              // Action buttons — moved outside; the duplicated SubManager text removed
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  vertical: 10,
-                  horizontal: 16,
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    Expanded(
-                      child: _buildActionButton(
-                        icon: Icons.analytics,
-                        label: "Analytics",
-                        bgColor: const Color(0xFFE3F2FD),
-                        iconColor: const Color(0xFF1565C0),
-                        onTap: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Analytics coming soon!'),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    SizedBox(width: 10),
-                    Expanded(
-                      child: _buildActionButton(
-                        icon: Icons.receipt_long,
-                        label: "All Bills",
-                        bgColor: const Color(0xFFE8F5E8),
-                        iconColor: const Color(0xFF2E7D32),
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => AllBillsScreen()),
-                          );
-                        },
-                      ),
-                    ),
-                    SizedBox(width: 10),
-                    Expanded(
-                      child: _buildActionButton(
-                        icon: Icons.add,
-                        label: "Add Bill",
-                        bgColor: const Color(0xFFFFF3E0),
-                        iconColor: const Color(0xFFEF6C00),
-                        onTap: () => _showAddBillBottomSheet(context),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              const SizedBox(height: 20),
 
               // Category Tabs Section
-              const SizedBox(height: 20),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Column(
@@ -2164,12 +2091,16 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
               ),
+
               const SizedBox(height: 20),
+
               // Category Content
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: _buildCategoryContent(),
               ),
+
+              const SizedBox(height: 30),
             ],
           ),
         ),
@@ -2205,7 +2136,7 @@ class _HomeScreenState extends State<HomeScreen> {
             borderRadius: BorderRadius.circular(16),
           ),
           elevation: 0,
-          minimumSize: const Size(100, 100),
+          minimumSize: const Size(80, 70),
           padding: EdgeInsets.zero,
         ),
         child: Column(
@@ -2269,42 +2200,72 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildCategoryTabs() {
-    return Container(
+    return SizedBox(
       height: 40,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        itemCount: Category.defaultCategories.length + 1, // +1 for "All"
-        itemBuilder: (context, index) {
-          if (index == 0) {
-            // "All" tab
-            return Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: _buildCategoryTab(
-                title: 'All',
-                isSelected: _selectedCategory == 'all',
-                onTap: () {
-                  setState(() {
-                    _selectedCategory = 'all';
-                  });
-                },
+      child: Stack(
+        children: [
+          // 1️⃣ Horizontal scrollable tabs
+          ListView.builder(
+            scrollDirection: Axis.horizontal,
+            itemCount: Category.defaultCategories.length + 1, // +1 for "All"
+            itemBuilder: (context, index) {
+              if (index == 0) {
+                // "All" tab
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: _buildCategoryTab(
+                    title: 'All',
+                    isSelected: _selectedCategory == 'all',
+                    onTap: () {
+                      setState(() {
+                        _selectedCategory = 'all';
+                      });
+                    },
+                  ),
+                );
+              } else {
+                final category = Category.defaultCategories[index - 1];
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: _buildCategoryTab(
+                    title: category.name,
+                    isSelected: _selectedCategory == category.id,
+                    onTap: () {
+                      setState(() {
+                        _selectedCategory = category.id;
+                      });
+                    },
+                  ),
+                );
+              }
+            },
+          ),
+
+          // 2️⃣ Right scroll indicator
+          Positioned(
+            right: 0,
+            top: 0,
+            bottom: 0,
+            child: Container(
+              width: 20,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                  colors: [
+                    Colors.transparent,
+                    HSLColor.fromAHSL(
+                      1.0,
+                      236,
+                      0.89,
+                      0.65,
+                    ).toColor().withOpacity(0.4),
+                  ],
+                ),
               ),
-            );
-          } else {
-            final category = Category.defaultCategories[index - 1];
-            return Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: _buildCategoryTab(
-                title: category.name,
-                isSelected: _selectedCategory == category.id,
-                onTap: () {
-                  setState(() {
-                    _selectedCategory = category.id;
-                  });
-                },
-              ),
-            );
-          }
-        },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -2319,19 +2280,10 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected ? null : Colors.white,
-          gradient: isSelected
-              ? LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  stops: const [0.0, 0.5, 1.0],
-                  colors: [
-                    HSLColor.fromAHSL(1.0, 152, 0.76, 0.36).toColor(),
-                    HSLColor.fromAHSL(1.0, 200, 0.85, 0.75).toColor(),
-                    HSLColor.fromAHSL(1.0, 270, 0.5, 0.75).toColor(),
-                  ],
-                )
-              : null,
+          color: isSelected
+              ? HSLColor.fromAHSL(1.0, 236, 0.89, 0.75)
+                    .toColor() // 🔹 same as bottom nav
+              : Colors.white,
           borderRadius: BorderRadius.circular(20),
           border: isSelected
               ? null
@@ -2463,59 +2415,37 @@ class _HomeScreenState extends State<HomeScreen> {
       return aDate.compareTo(bDate);
     });
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[300]!),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Category header
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: category?.backgroundColor ?? Colors.grey[100],
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(12),
-              ),
-            ),
-            child: Row(
-              children: [
-                if (category != null)
-                  Icon(category.icon, color: category.color, size: 20),
-                const SizedBox(width: 8),
-                Text(
-                  category?.name ?? 'Unknown Category',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                    color: category?.color ?? Colors.black87,
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  '${bills.length} bill${bills.length != 1 ? 's' : ''}',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                ),
-              ],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Category name header
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          child: Text(
+            category?.name ?? 'Unknown Category',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor(),
             ),
           ),
-          // Bills list
-          ListView.separated(
+        ),
+        // Bills card
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: ListView.separated(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             itemCount: bills.length,
-            separatorBuilder: (context, index) =>
+            separatorBuilder: (_, __) =>
                 Divider(height: 1, color: Colors.grey[200]),
-            itemBuilder: (context, index) {
-              final bill = bills[index];
-              return _buildBillItem(bill);
-            },
+            itemBuilder: (_, index) => _buildBillItem(bills[index]),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -2527,189 +2457,168 @@ class _HomeScreenState extends State<HomeScreen> {
     final isPaid = bill['status'] == 'paid';
     final billIndex = _bills.indexOf(bill);
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Card(
-        elevation: 3,
-        shadowColor: Colors.black.withOpacity(0.1),
-        shape: RoundedRectangleBorder(
+    return Dismissible(
+      key: Key(bill['id'] ?? billIndex.toString()),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        decoration: BoxDecoration(
+          color: HSLColor.fromAHSL(1.0, 0, 0.8, 0.8).toColor(),
           borderRadius: BorderRadius.circular(16),
-          side: BorderSide(
-            color: isPaid
-                ? Colors.green.withOpacity(0.3)
-                : (isOverdue
-                      ? Colors.red.withOpacity(0.3)
-                      : Colors.orange.withOpacity(0.3)),
-            width: 1,
-          ),
         ),
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            color: Colors.white,
-            boxShadow: [
-              BoxShadow(
-                color: isPaid
-                    ? Colors.green.withOpacity(0.08)
-                    : (isOverdue
-                          ? Colors.red.withOpacity(0.08)
-                          : Colors.orange.withOpacity(0.08)),
-                blurRadius: 12,
-                spreadRadius: 1,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: isPaid
-                            ? Colors.green.withOpacity(0.1)
-                            : (isOverdue
-                                  ? Colors.red.withOpacity(0.1)
-                                  : Colors.orange.withOpacity(0.1)),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Icon(
-                        isPaid
-                            ? Icons.check_circle
-                            : (isOverdue ? Icons.error : Icons.access_time),
-                        color: isPaid
-                            ? Colors.green
-                            : (isOverdue ? Colors.red : Colors.orange),
-                        size: 20,
-                      ),
+        child: const Icon(Icons.delete, color: Colors.white),
+      ),
+      onDismissed: (_) => _deleteBill(billIndex),
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: HSLColor.fromAHSL(1.0, 236, 0.89, 0.85).toColor(),
+              blurRadius: 6,
+              spreadRadius: 1,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Bill header
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: isPaid
+                          ? HSLColor.fromAHSL(1.0, 236, 0.89, 0.7).toColor()
+                          : (isOverdue
+                                ? HSLColor.fromAHSL(1.0, 0, 0.8, 0.85).toColor()
+                                : HSLColor.fromAHSL(
+                                    1.0,
+                                    36,
+                                    0.9,
+                                    0.85,
+                                  ).toColor()),
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            bill['name'] ?? 'Unknown Bill',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                              color: Colors.black87,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.calendar_today,
-                                size: 14,
-                                color: Colors.grey[600],
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                dueDate != null
-                                    ? _formatDate(dueDate)
-                                    : 'No due date',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey[600],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
+                    child: Icon(
+                      isPaid
+                          ? Icons.check_circle
+                          : (isOverdue ? Icons.error : Icons.access_time),
+                      color: isPaid
+                          ? HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor()
+                          : Colors.orange,
+                      size: 20,
                     ),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '\$${_parseAmount(bill['amount']).toStringAsFixed(2)}',
+                          bill['name'] ?? 'Unknown Bill',
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
-                            fontSize: 18,
+                            fontSize: 16,
                             color: Colors.black87,
                           ),
                         ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: isPaid
-                                ? Colors.green
-                                : (isOverdue ? Colors.red : Colors.orange),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            isPaid
-                                ? 'Paid'
-                                : (isOverdue ? 'Overdue' : 'Upcoming'),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.calendar_today,
+                              size: 14,
+                              color: Colors.grey[600],
                             ),
-                          ),
+                            const SizedBox(width: 4),
+                            Text(
+                              dueDate != null
+                                  ? _formatDate(dueDate)
+                                  : 'No due date',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    if (!isPaid) ...[
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () => _markAsPaid(billIndex),
-                          icon: const Icon(Icons.check, size: 16),
-                          label: const Text('Mark as Paid'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.green,
-                            side: const BorderSide(color: Colors.green),
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                    ],
-                    Expanded(
+                  ),
+                  Text(
+                    '\$${_parseAmount(bill['amount']).toStringAsFixed(2)}',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      color: isPaid
+                          ? HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor()
+                          : Colors.black87,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              // Compact actions
+              Row(
+                children: [
+                  if (!isPaid)
+                    SizedBox(
+                      height: 30,
                       child: OutlinedButton.icon(
-                        onPressed: () => _showQuickEditSheet(context, bill),
-                        icon: const Icon(Icons.edit, size: 16),
-                        label: const Text('Edit'),
+                        onPressed: () => _markAsPaid(billIndex),
+                        icon: const Icon(Icons.check, size: 16),
+                        label: const Text(
+                          'Paid',
+                          style: TextStyle(fontSize: 12),
+                        ),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.blue,
-                          side: const BorderSide(color: Colors.blue),
-                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          foregroundColor: Colors.green,
+                          side: const BorderSide(color: Colors.green),
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          minimumSize: const Size(0, 0),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: Colors.red.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: IconButton(
-                        onPressed: () => _deleteBill(billIndex),
-                        icon: const Icon(Icons.delete, size: 16),
-                        color: Colors.red,
-                        constraints: const BoxConstraints(
-                          minWidth: 32,
-                          minHeight: 32,
+                  if (!isPaid) const SizedBox(width: 8),
+                  SizedBox(
+                    height: 30,
+                    child: OutlinedButton.icon(
+                      onPressed: () => _showQuickEditSheet(context, bill),
+                      icon: const Icon(Icons.edit, size: 16),
+                      label: const Text('Edit', style: TextStyle(fontSize: 12)),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: HSLColor.fromAHSL(
+                          1.0,
+                          236,
+                          0.89,
+                          0.65,
+                        ).toColor(),
+                        side: BorderSide(
+                          color: HSLColor.fromAHSL(
+                            1.0,
+                            236,
+                            0.89,
+                            0.65,
+                          ).toColor(),
                         ),
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        minimumSize: const Size(0, 0),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
                     ),
-                  ],
-                ),
-              ],
-            ),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
       ),
@@ -3249,7 +3158,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _showAddBillBottomSheet(BuildContext context) {
+  void showAddBillBottomSheet(BuildContext context) {
     final _formKey = GlobalKey<FormState>();
     final _nameController = TextEditingController();
     final _amountController = TextEditingController();
@@ -4099,19 +4008,57 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _addSubscription(Map<String, dynamic> subscription) async {
-    try {
-      // Try to add to Firebase first
-      await _subscriptionService.addSubscription(subscription);
+    // Check network status first
+    await _checkConnectivity();
+    debugPrint('Adding subscription. Network status: $_isOnline');
 
-      // If successful, add to local list
-      if (mounted) {
-        setState(() {
-          _bills.add(subscription);
-          _checkForOverdueBills(); // Immediate check for overdue status
-        });
+    if (_isOnline) {
+      try {
+        // Try to add to Firebase first
+        await _subscriptionService.addSubscription(subscription);
+
+        // If successful, add to local list
+        if (mounted) {
+          setState(() {
+            _bills.add(subscription);
+            _checkForOverdueBills(); // Immediate check for overdue status
+          });
+
+          // Show success message
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('${subscription['name']} added successfully!'),
+              backgroundColor: Colors.green,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          );
+        }
+      } catch (e) {
+        // If Firebase fails, add to local list only (will sync later)
+        if (mounted) {
+          setState(() {
+            _bills.add(subscription);
+            _checkForOverdueBills(); // Immediate check for overdue status
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '${subscription['name']} saved locally. Will sync when online.',
+              ),
+              backgroundColor: Colors.orange,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          );
+        }
       }
-    } catch (e) {
-      // If Firebase fails, add to local list only (will sync later)
+    } else {
+      // Offline: Add to local list only
       if (mounted) {
         setState(() {
           _bills.add(subscription);
@@ -4119,8 +4066,14 @@ class _HomeScreenState extends State<HomeScreen> {
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Saved locally. Will sync when online.'),
+            content: Text(
+              '${subscription['name']} saved locally. Will sync when online.',
+            ),
             backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
           ),
         );
       }
@@ -4130,24 +4083,71 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _deleteSubscription(int index) async {
     final subscription = _bills[index];
 
-    try {
-      // Try to delete from Firebase
-      if (subscription['firebaseId'] != null) {
-        await _subscriptionService.deleteSubscription(
-          subscription['firebaseId'],
-        );
-      } else if (subscription['localId'] != null) {
-        await _subscriptionService.deleteSubscription(subscription['localId']);
-      }
+    // Check network status first
+    await _checkConnectivity();
 
-      // Refresh the list
-      await _loadSubscriptions();
-    } catch (e) {
-      // If Firebase fails, just remove from local list
+    if (_isOnline) {
+      try {
+        // Try to delete from Firebase
+        if (subscription['firebaseId'] != null) {
+          await _subscriptionService.deleteSubscription(
+            subscription['firebaseId'],
+          );
+        } else if (subscription['localId'] != null) {
+          await _subscriptionService.deleteSubscription(
+            subscription['localId'],
+          );
+        }
+
+        // Refresh the list
+        await _loadSubscriptions();
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('${subscription['name']} deleted successfully!'),
+              backgroundColor: Colors.green,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          );
+        }
+      } catch (e) {
+        // If Firebase fails, just remove from local list
+        if (mounted) {
+          setState(() {
+            _bills.removeAt(index);
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('${subscription['name']} deleted locally.'),
+              backgroundColor: Colors.orange,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          );
+        }
+      }
+    } else {
+      // Offline: Just remove from local list
       if (mounted) {
         setState(() {
           _bills.removeAt(index);
         });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${subscription['name']} deleted locally.'),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        );
       }
     }
   }

@@ -106,28 +106,53 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  Widget _buildSettingTile({
+  Widget _buildSection(String title, List<Widget> children) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.bold,
+            color: Colors.black87,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            children: children,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildProfileTile({
     required IconData icon,
     required Color iconColor,
     required String title,
     required String subtitle,
-    required Widget trailing,
+    required bool isEditable,
     VoidCallback? onTap,
   }) {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
       ),
       child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         leading: Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
@@ -154,8 +179,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             color: Colors.grey[600],
           ),
         ),
-        trailing: trailing,
-        onTap: onTap,
+        trailing: isEditable
+            ? const Icon(Icons.chevron_right, color: Colors.grey)
+            : null,
+        onTap: isEditable ? onTap : null,
       ),
     );
   }
@@ -166,7 +193,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
         title: const Text(
-          "Profile & Settings",
+          "Profile",
           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 24),
         ),
         backgroundColor: Colors.white,
@@ -212,309 +239,217 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     padding: const EdgeInsets.all(16),
                     child: Column(
                       children: [
-                        // Profile Header Card
+                        // Compact Profile Header
                         Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(24),
                           decoration: BoxDecoration(
-                            gradient: const LinearGradient(
-                              colors: [Color(0xFF1976D2), Color(0xFF1565C0)],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                            borderRadius: BorderRadius.circular(16),
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
                             boxShadow: [
                               BoxShadow(
-                                color: const Color(0xFF1976D2).withOpacity(0.2),
-                                blurRadius: 10,
-                                offset: const Offset(0, 4),
+                                color: Colors.black.withOpacity(0.05),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
                               ),
                             ],
                           ),
-                          child: Column(
-                            children: [
-                              // Profile Picture
-                              Container(
-                                width: 80,
-                                height: 80,
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.2),
-                                  borderRadius: BorderRadius.circular(40),
-                                  border: Border.all(
-                                    color: Colors.white,
-                                    width: 3,
-                                  ),
+                          child: ListTile(
+                            contentPadding: const EdgeInsets.all(16),
+                            leading: Container(
+                              width: 60,
+                              height: 60,
+                              decoration: BoxDecoration(
+                                color: Colors.blue.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(30),
+                                border: Border.all(
+                                  color: Colors.blue.withOpacity(0.3),
+                                  width: 2,
                                 ),
-                                child: _photoURL.isNotEmpty
-                                    ? ClipRRect(
-                                        borderRadius: BorderRadius.circular(37),
-                                        child: Image.network(
-                                          _photoURL,
-                                          fit: BoxFit.cover,
-                                          errorBuilder: (context, error, stackTrace) {
-                                            return Icon(
-                                              Icons.person,
-                                              size: 40,
-                                              color: Colors.white.withOpacity(0.8),
-                                            );
-                                          },
-                                        ),
-                                      )
-                                    : Icon(
-                                        Icons.person,
-                                        size: 40,
-                                        color: Colors.white.withOpacity(0.8),
-                                      ),
                               ),
-                              const SizedBox(height: 16),
-
-                              // User Info
-                              if (_isEditing) ...[
-                                TextField(
-                                  controller: _nameController,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                  decoration: InputDecoration(
-                                    hintText: 'Display Name',
-                                    hintStyle: TextStyle(
-                                      color: Colors.white.withOpacity(0.7),
-                                    ),
-                                    enabledBorder: UnderlineInputBorder(
-                                      borderSide: BorderSide(
-                                        color: Colors.white.withOpacity(0.5),
+                              child: _photoURL.isNotEmpty
+                                  ? ClipRRect(
+                                      borderRadius: BorderRadius.circular(28),
+                                      child: Image.network(
+                                        _photoURL,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (context, error, stackTrace) {
+                                          return Icon(
+                                            Icons.person,
+                                            size: 30,
+                                            color: Colors.blue.withOpacity(0.8),
+                                          );
+                                        },
                                       ),
+                                    )
+                                  : Icon(
+                                      Icons.person,
+                                      size: 30,
+                                      color: Colors.blue.withOpacity(0.8),
                                     ),
-                                    focusedBorder: const UnderlineInputBorder(
-                                      borderSide: BorderSide(color: Colors.white),
+                            ),
+                            title: _isEditing
+                                ? TextField(
+                                    controller: _nameController,
+                                    style: const TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                    decoration: InputDecoration(
+                                      hintText: 'Display Name',
+                                      isDense: true,
+                                      contentPadding: EdgeInsets.zero,
+                                    ),
+                                  )
+                                : Text(
+                                    _displayName,
+                                    style: const TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
                                     ),
                                   ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  _email,
-                                  style: TextStyle(
-                                    color: Colors.white.withOpacity(0.7),
-                                    fontSize: 14,
-                                  ),
-                                ),
-                              ] else ...[
-                                Text(
-                                  _displayName,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 24,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  _email,
-                                  style: TextStyle(
-                                    color: Colors.white.withOpacity(0.9),
-                                    fontSize: 16,
-                                  ),
-                                ),
-                              ],
-
-                              const SizedBox(height: 16),
-
-                              // Edit/Save Button
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  if (_isEditing) ...[
-                                    TextButton(
-                                      onPressed: () {
-                                        setState(() {
-                                          _isEditing = false;
-                                          _nameController.text = _displayName;
-                                        });
-                                      },
-                                      style: TextButton.styleFrom(
-                                        foregroundColor: Colors.white,
-                                      ),
-                                      child: const Text('Cancel'),
-                                    ),
-                                    const SizedBox(width: 16),
-                                    ElevatedButton(
-                                      onPressed: _updateUserProfile,
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.white,
-                                        foregroundColor: const Color(0xFF1976D2),
-                                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                                      ),
-                                      child: const Text('Save Changes'),
-                                    ),
-                                  ] else
-                                    ElevatedButton(
-                                      onPressed: () {
-                                        setState(() {
-                                          _isEditing = true;
-                                        });
-                                      },
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.white,
-                                        foregroundColor: const Color(0xFF1976D2),
-                                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                                      ),
-                                      child: const Text('Edit Profile'),
-                                    ),
-                                ],
+                            subtitle: Text(
+                              _email,
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey[600],
                               ),
-                            ],
+                            ),
+                            trailing: _isEditing
+                                ? Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        onPressed: () {
+                                          setState(() {
+                                            _isEditing = false;
+                                            _nameController.text = _displayName;
+                                          });
+                                        },
+                                        icon: const Icon(Icons.close),
+                                        color: Colors.grey,
+                                      ),
+                                      IconButton(
+                                        onPressed: _updateUserProfile,
+                                        icon: const Icon(Icons.check),
+                                        color: Colors.green,
+                                      ),
+                                    ],
+                                  )
+                                : IconButton(
+                                    onPressed: () {
+                                      setState(() {
+                                        _isEditing = true;
+                                      });
+                                    },
+                                    icon: const Icon(Icons.edit),
+                                    color: Colors.blue,
+                                  ),
                           ),
                         ),
 
                         const SizedBox(height: 24),
 
-                        // Settings Section
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Settings',
-                              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black87,
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-
-                            // Notifications Setting
-                            _buildSettingTile(
-                              icon: Icons.notifications_outlined,
-                              iconColor: Colors.blue,
-                              title: 'Notifications',
-                              subtitle: 'Enable push notifications',
-                              trailing: Switch(
-                                value: _notificationsEnabled,
-                                onChanged: (value) {
-                                  setState(() {
-                                    _notificationsEnabled = value;
-                                  });
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(_notificationsEnabled
-                                          ? 'Notifications enabled'
-                                          : 'Notifications disabled'),
-                                      backgroundColor: Colors.grey,
-                                    ),
-                                  );
-                                },
-                              ),
-                            ),
-
-                            const SizedBox(height: 12),
-
-                            // Dark Mode Setting
-                            _buildSettingTile(
-                              icon: Icons.dark_mode_outlined,
-                              iconColor: Colors.purple,
-                              title: 'Dark Mode',
-                              subtitle: 'Toggle dark theme',
-                              trailing: Switch(
-                                value: _darkModeEnabled,
-                                onChanged: (value) {
-                                  setState(() {
-                                    _darkModeEnabled = value;
-                                  });
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(_darkModeEnabled
-                                          ? 'Dark mode enabled'
-                                          : 'Light mode enabled'),
-                                      backgroundColor: Colors.grey,
-                                    ),
-                                  );
-                                },
-                              ),
-                            ),
-
-                            const SizedBox(height: 12),
-
-                            // About Setting
-                            _buildSettingTile(
-                              icon: Icons.info_outlined,
-                              iconColor: Colors.green,
-                              title: 'About',
-                              subtitle: 'App version and information',
-                              trailing: const Icon(Icons.chevron_right),
-                              onTap: () {
-                                showDialog(
-                                  context: context,
-                                  builder: (context) => AlertDialog(
-                                    title: const Text('About'),
-                                    content: const Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Text('SubManager'),
-                                        SizedBox(height: 8),
-                                        Text('Version 1.0.0'),
-                                        SizedBox(height: 8),
-                                        Text('Manage your subscriptions with ease'),
-                                      ],
-                                    ),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () => Navigator.pop(context),
-                                        child: const Text('Close'),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              },
-                            ),
-                          ],
-                        ),
+                        // Profile Information Section
+                        _buildSection('Profile Information', [
+                          _buildProfileTile(
+                            icon: Icons.account_circle_outlined,
+                            iconColor: Colors.blue,
+                            title: 'Account Status',
+                            subtitle: 'Active',
+                            isEditable: false,
+                          ),
+                          _buildProfileTile(
+                            icon: Icons.calendar_today_outlined,
+                            iconColor: Colors.green,
+                            title: 'Member Since',
+                            subtitle: 'January 2024',
+                            isEditable: false,
+                          ),
+                          _buildProfileTile(
+                            icon: Icons.email_outlined,
+                            iconColor: Colors.orange,
+                            title: 'Email',
+                            subtitle: _email,
+                            isEditable: false,
+                          ),
+                        ]),
 
                         const SizedBox(height: 24),
 
                         // Account Actions Section
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Account',
-                              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black87,
+                        _buildSection('Account Actions', [
+                          _buildProfileTile(
+                            icon: Icons.lock_outlined,
+                            iconColor: Colors.purple,
+                            title: 'Change Password',
+                            subtitle: 'Update your password',
+                            isEditable: true,
+                            onTap: () {
+                              // Placeholder for password change
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Password change functionality coming soon!'),
+                                  backgroundColor: Colors.blue,
+                                ),
+                              );
+                            },
+                          ),
+                          _buildProfileTile(
+                            icon: Icons.security_outlined,
+                            iconColor: Colors.red,
+                            title: 'Privacy Settings',
+                            subtitle: 'Manage your privacy',
+                            isEditable: true,
+                            onTap: () {
+                              // Placeholder for privacy settings
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Privacy settings coming soon!'),
+                                  backgroundColor: Colors.blue,
+                                ),
+                              );
+                            },
+                          ),
+                          _buildProfileTile(
+                            icon: Icons.refresh_outlined,
+                            iconColor: Colors.teal,
+                            title: 'Refresh Profile',
+                            subtitle: 'Reload profile information',
+                            isEditable: true,
+                            onTap: () async {
+                              await _loadUserData();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Profile refreshed successfully!'),
+                                  backgroundColor: Colors.green,
+                                ),
+                              );
+                            },
+                          ),
+                        ]),
+
+                        const SizedBox(height: 24),
+
+                        // Sign Out Button
+                        Container(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: _signOut,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
                               ),
                             ),
-                            const SizedBox(height: 16),
-
-                            // Refresh Data
-                            _buildSettingTile(
-                              icon: Icons.refresh_outlined,
-                              iconColor: Colors.orange,
-                              title: 'Refresh Data',
-                              subtitle: 'Reload profile information',
-                              trailing: const Icon(Icons.chevron_right),
-                              onTap: () async {
-                                await _loadUserData();
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Data refreshed successfully!'),
-                                    backgroundColor: Colors.green,
-                                  ),
-                                );
-                              },
+                            child: const Text(
+                              'Sign Out',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
-
-                            const SizedBox(height: 12),
-
-                            // Sign Out
-                            _buildSettingTile(
-                              icon: Icons.logout_outlined,
-                              iconColor: Colors.red,
-                              title: 'Sign Out',
-                              subtitle: 'Sign out from your account',
-                              trailing: const Icon(Icons.chevron_right),
-                              onTap: _signOut,
-                            ),
-                          ],
+                          ),
                         ),
 
                         const SizedBox(height: 32),
