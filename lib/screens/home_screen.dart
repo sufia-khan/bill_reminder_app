@@ -1419,6 +1419,19 @@ class _HomeScreenState extends State<HomeScreen> {
     return thisMonthTotal - lastMonthTotal;
   }
 
+  double _calculateMonthlyPercentageChange() {
+    double thisMonthTotal = _calculateMonthlyTotal();
+    double difference = _calculateMonthlyDifference();
+
+    if (thisMonthTotal == 0) return 0;
+
+    return (difference / thisMonthTotal) * 100;
+  }
+
+  bool _isMonthlyIncrease() {
+    return _calculateMonthlyDifference() > 0;
+  }
+
   int _getUpcomingCount() {
     int count = 0;
     final now = DateTime.now();
@@ -1582,171 +1595,153 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final authService = AuthService();
+
     return Scaffold(
-      extendBodyBehindAppBar: true,
-      extendBody: true,
-      backgroundColor: Colors.white,
-      body: SafeArea(
-        minimum: const EdgeInsets.all(16),
-        child: RefreshIndicator(
-          onRefresh: _loadSubscriptions,
-          color: Colors.white,
-          backgroundColor: Colors.transparent,
-          displacement: 40,
-          strokeWidth: 3,
-          child: Container(
-            color: Colors.white, // ✅ overall white background
-            child: ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              children: [
-                // Purple Card (App Bar + Stats)
-                Container(
-                  margin: const EdgeInsets.all(0), // ✅ no margin
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        HSLColor.fromAHSL(
-                          1.0,
-                          236,
-                          0.89,
-                          0.85,
-                        ).toColor(), // Very light blue
-                        HSLColor.fromAHSL(
-                          1.0,
-                          236,
-                          0.89,
-                          0.75,
-                        ).toColor(), // Light blue
-                        HSLColor.fromAHSL(
-                          1.0,
-                          236,
-                          0.89,
-                          0.65,
-                        ).toColor(), // Medium blue
-                      ],
-                    ),
-                    borderRadius: BorderRadius.only(
-                      bottomLeft: Radius.circular(30),
-                      bottomRight: Radius.circular(30),
-                    ),
+      // AppBar now *is* the gradient card (single container)
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(
+          290.0,
+        ), // height includes title + stats
+        child: AppBar(
+          elevation: 0,
+          backgroundColor:
+              Colors.transparent, // let flexibleSpace draw the gradient
+          automaticallyImplyLeading: false,
+          flexibleSpace: ClipRRect(
+            borderRadius: const BorderRadius.only(
+              bottomLeft: Radius.circular(30),
+              bottomRight: Radius.circular(30),
+            ),
+            child: Container(
+              // The unified gradient container (app bar + stats)
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft, // similar direction to CSS 135deg
+                  end: Alignment.bottomRight,
+                  stops: const [0.0, 0.5, 1.0],
+                  colors: [
+                    // CSS: hsl(152 76% 36%)
+                    HSLColor.fromAHSL(1.0, 152, 0.76, 0.36).toColor(),
+
+                    // CSS: hsl(200 85% 75%)
+                    HSLColor.fromAHSL(1.0, 200, 0.85, 0.75).toColor(),
+
+                    // CSS: hsl(270 50% 75%)
+                    HSLColor.fromAHSL(1.0, 270, 0.5, 0.75).toColor(),
+                  ],
+                ),
+                borderRadius: const BorderRadius.only(
+                  bottomLeft: Radius.circular(30),
+                  bottomRight: Radius.circular(30),
+                ),
+              ),
+
+              // Use Column to stack top row (title) and stats below
+              child: SafeArea(
+                bottom: false, // we only need SafeArea for top here
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
                   ),
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // App Bar Section
-                      Container(
-                        padding: const EdgeInsets.only(
-                          top: 50,
-                          left: 20,
-                          right: 20,
-                          bottom: 10,
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            // App name + icon
-                            Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(8),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withOpacity(0.2),
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                  child: const Icon(
-                                    Icons.subscriptions,
-                                    color: Colors.white,
-                                    size: 24,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: const [
-                                    Text(
-                                      'SubManager',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 24,
-                                      ),
-                                    ),
-                                    SizedBox(height: 2),
-                                    ChangingSubtitle(),
-                                  ],
-                                ),
-                              ],
-                            ),
-
-                            // Profile Section
-                            GestureDetector(
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => const ProfileScreen(),
-                                  ),
-                                );
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
-                                ),
+                      // Top row: icon + title/subtitle + profile
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(6),
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.2),
-                                  borderRadius: BorderRadius.circular(20),
+                                  color: Colors.orange.withOpacity(0.5),
+                                  borderRadius: BorderRadius.circular(12),
                                 ),
-                                child: Row(
-                                  children: [
-                                    Text(
-                                      authService.currentUser?.displayName ??
-                                          'User',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.w500,
-                                        fontSize: 14,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Container(
-                                      padding: const EdgeInsets.all(4),
-                                      decoration: const BoxDecoration(
-                                        color: Colors.white,
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: Icon(
-                                        Icons.person,
-                                        color: Colors.purple,
-                                        size: 16,
-                                      ),
-                                    ),
-                                  ],
+                                child: const Icon(
+                                  Icons.notifications_active_rounded,
+                                  color: Colors.deepOrange,
+                                  size: 25,
                                 ),
                               ),
+                              const SizedBox(width: 12),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'SubManager',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 23,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  const ChangingSubtitle(),
+                                ],
+                              ),
+                            ],
+                          ),
+
+                          // Profile (kept inside the same top row)
+                          GestureDetector(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const ProfileScreen(),
+                                ),
+                              );
+                            },
+                            child: Column(
+                              children: [
+                                CircleAvatar(
+                                  radius: 18,
+                                  backgroundColor: Colors.white.withOpacity(
+                                    0.9,
+                                  ),
+                                  child: Icon(
+                                    Icons.person,
+                                    color: Colors.blueAccent,
+                                    size: 18,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                // Text(
+                                //   authService.currentUser?.displayName ??
+                                //       'User',
+                                //   style: TextStyle(
+                                //     color: Colors.white,
+                                //     fontWeight: FontWeight.w500,
+                                //     fontSize: 14,
+                                //   ),
+                                // ),
+                              ],
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
 
-                      // Stats Section (inside purple card)
+                      const SizedBox(height: 18),
+
+                      // Stats row (inside same gradient container)
                       Padding(
-                        padding: const EdgeInsets.all(25),
+                        padding: const EdgeInsets.symmetric(horizontal: 2),
                         child: Row(
                           children: [
-                            // Monthly Summary
+                            // This Month card
                             Expanded(
                               child: Container(
-                                height: 170, // Fixed height for consistency
+                                height: 170,
                                 padding: const EdgeInsets.all(15.0),
                                 decoration: BoxDecoration(
                                   color: Colors.white,
-                                  borderRadius: BorderRadius.circular(24),
+                                  borderRadius: BorderRadius.circular(20),
                                   boxShadow: [
                                     BoxShadow(
                                       color: Colors.black.withOpacity(0.08),
-                                      blurRadius: 15,
+                                      blurRadius: 10,
                                       offset: const Offset(0, 6),
                                     ),
                                   ],
@@ -1770,7 +1765,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                             ),
                                           ),
                                           child: Icon(
-                                            Icons.attach_money,
+                                            Icons.trending_up_rounded,
                                             color: HSLColor.fromAHSL(
                                               1.0,
                                               236,
@@ -1781,33 +1776,81 @@ class _HomeScreenState extends State<HomeScreen> {
                                           ),
                                         ),
                                         const SizedBox(width: 8),
-                                        const Text(
-                                          "This Month",
-                                          style: TextStyle(
-                                            color: Colors.grey,
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w500,
-                                          ),
+                                        const Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: const [
+                                            Text(
+                                              'Monthly',
+                                              style: TextStyle(
+                                                color: Colors.black87,
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                            SizedBox(height: 2),
+                                            Text(
+                                              'Total',
+                                              style: TextStyle(
+                                                color: Colors.black87,
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ],
                                     ),
                                     const SizedBox(height: 16),
                                     Expanded(
-                                      child: Row(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
-                                          Icon(
-                                            Icons.trending_up,
-                                            color: Colors.green,
-                                            size: 20,
+                                          Row(
+                                            children: [
+                                              Text(
+                                                '\$${_calculateMonthlyTotal().toStringAsFixed(2)}',
+                                                style: const TextStyle(
+                                                  fontSize: 22,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.black,
+                                                ),
+                                              ),
+                                            ],
                                           ),
-                                          const SizedBox(width: 10),
-                                          Text(
-                                            '\$${_calculateMonthlyTotal().toStringAsFixed(2)}',
-                                            style: const TextStyle(
-                                              fontSize: 24,
-                                              fontWeight: FontWeight.bold,
-                                              color: Colors.black,
-                                            ),
+                                          const SizedBox(height: 10),
+                                          Row(
+                                            children: [
+                                              Icon(
+                                                _isMonthlyIncrease()
+                                                    ? Icons.arrow_downward
+                                                    : Icons.arrow_upward,
+                                                color: _isMonthlyIncrease()
+                                                    ? Colors.red
+                                                    : Colors.green,
+                                                size: 16,
+                                              ),
+                                              const SizedBox(width: 6),
+                                              Text(
+                                                '${_calculateMonthlyPercentageChange().abs().toStringAsFixed(1)}%',
+                                                style: TextStyle(
+                                                  fontSize: 14,
+                                                  fontWeight: FontWeight.w500,
+                                                  color: _isMonthlyIncrease()
+                                                      ? Colors.red
+                                                      : Colors.green,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Text(
+                                                'than last month',
+                                                style: TextStyle(
+                                                  fontSize: 10,
+                                                  color: Colors.grey[600],
+                                                ),
+                                              ),
+                                            ],
                                           ),
                                         ],
                                       ),
@@ -1816,19 +1859,21 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                               ),
                             ),
+
                             const SizedBox(width: 12),
-                            // Upcoming Bills
+
+                            // Next 14 days card
                             Expanded(
                               child: Container(
-                                height: 170, // Fixed height for consistency
+                                height: 170,
                                 padding: const EdgeInsets.all(15.0),
                                 decoration: BoxDecoration(
                                   color: Colors.white,
-                                  borderRadius: BorderRadius.circular(24),
+                                  borderRadius: BorderRadius.circular(20),
                                   boxShadow: [
                                     BoxShadow(
                                       color: Colors.black.withOpacity(0.08),
-                                      blurRadius: 15,
+                                      blurRadius: 10,
                                       offset: const Offset(0, 6),
                                     ),
                                   ],
@@ -1848,7 +1893,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                               12,
                                             ),
                                           ),
-                                          child: Icon(
+                                          child: const Icon(
                                             Icons.upcoming,
                                             color: Colors.orange,
                                             size: 20,
@@ -1869,14 +1914,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                     Expanded(
                                       child: Row(
                                         children: [
-                                          Icon(
+                                          const Icon(
                                             Icons.calendar_today,
                                             color: Colors.orange,
                                             size: 20,
                                           ),
-                                          const SizedBox(
-                                            width: 10,
-                                          ), // ⬅️ adjust this value (smaller gap)
+                                          const SizedBox(width: 10),
                                           Text(
                                             '${_getUpcoming14DaysCount()} bills',
                                             style: const TextStyle(
@@ -1898,53 +1941,78 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                 ),
-
-                // ✅ Action Buttons completely outside purple card
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    vertical: 20,
-                    horizontal: 16,
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      _buildActionButton(
-                        icon: Icons.analytics,
-                        label: "Analytics",
-                        bgColor: const Color(0xFFE3F2FD),
-                        iconColor: const Color(0xFF1565C0),
-                        onTap: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Analytics coming soon!'),
-                            ),
-                          );
-                        },
-                      ),
-                      _buildActionButton(
-                        icon: Icons.receipt_long,
-                        label: "All Bills",
-                        bgColor: const Color(0xFFE8F5E8),
-                        iconColor: const Color(0xFF2E7D32),
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => AllBillsScreen()),
-                          );
-                        },
-                      ),
-                      _buildActionButton(
-                        icon: Icons.add,
-                        label: "Add Bill",
-                        bgColor: const Color(0xFFFFF3E0),
-                        iconColor: const Color(0xFFEF6C00),
-                        onTap: () => _showAddBillBottomSheet(context),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+              ),
             ),
+          ),
+        ),
+      ),
+
+      // No need to extend body behind appBar now
+      extendBodyBehindAppBar: false,
+      extendBody: true,
+      backgroundColor: Colors.white,
+      body: SafeArea(
+        minimum: const EdgeInsets.all(6),
+        child: RefreshIndicator(
+          onRefresh: _loadSubscriptions,
+          color: Colors.white,
+          backgroundColor: Colors.transparent,
+          displacement: 40,
+          strokeWidth: 3,
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.only(
+              top: 12,
+            ), // small spacing under the card
+            children: [
+              // Action buttons — moved outside; the duplicated SubManager text removed
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  vertical: 10,
+                  horizontal: 16,
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    _buildActionButton(
+                      icon: Icons.analytics,
+                      label: "Analytics",
+                      bgColor: const Color(0xFFE3F2FD),
+                      iconColor: const Color(0xFF1565C0),
+                      onTap: () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Analytics coming soon!'),
+                          ),
+                        );
+                      },
+                    ),
+                    SizedBox(width: 10),
+                    _buildActionButton(
+                      icon: Icons.receipt_long,
+                      label: "All Bills",
+                      bgColor: const Color(0xFFE8F5E8),
+                      iconColor: const Color(0xFF2E7D32),
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => AllBillsScreen()),
+                        );
+                      },
+                    ),
+                    SizedBox(width: 10),
+
+                    _buildActionButton(
+                      icon: Icons.add,
+                      label: "Add Bill",
+                      bgColor: const Color(0xFFFFF3E0),
+                      iconColor: const Color(0xFFEF6C00),
+                      onTap: () => _showAddBillBottomSheet(context),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),
