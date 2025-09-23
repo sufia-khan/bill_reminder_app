@@ -31,6 +31,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isOnline = false;
   StreamSubscription<bool>? _connectivitySubscription;
   Timer? _updateTimer;
+  String _selectedCategory = 'all'; // 'all' or specific category id
   @override
   void initState() {
     super.initState();
@@ -1385,6 +1386,36 @@ class _HomeScreenState extends State<HomeScreen> {
     return total;
   }
 
+  double _calculateLastMonthTotal() {
+    double total = 0;
+    final now = DateTime.now();
+    final lastMonth = now.month == 1 ? 12 : now.month - 1;
+    final lastMonthYear = now.month == 1 ? now.year - 1 : now.year;
+
+    for (var bill in _bills) {
+      try {
+        final amount = _parseAmount(bill['amount']);
+        final dueDateStr = bill['dueDate']?.toString() ?? '';
+
+        if (dueDateStr.isNotEmpty) {
+          final parts = dueDateStr.split('/');
+          if (parts.length == 3) {
+            final day = int.parse(parts[0]);
+            final month = int.parse(parts[1]);
+            final year = int.parse(parts[2]);
+
+            if (month == lastMonth && year == lastMonthYear) {
+              total += amount;
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('Error calculating last month total: $e');
+      }
+    }
+    return total;
+  }
+
   double _calculateMonthlyDifference() {
     // Calculate actual difference based on last month's data
     final now = DateTime.now();
@@ -1578,9 +1609,10 @@ class _HomeScreenState extends State<HomeScreen> {
       try {
         final dueDate = _parseDueDate(bill);
         if (dueDate != null) {
-          // Count bills that are due within the next 14 days and not yet paid
-          if (dueDate.isAfter(now) &&
-              dueDate.isBefore(fourteenDaysFromNow) &&
+          // Count bills that are due within the next 14 days (inclusive) and not yet paid
+          if ((dueDate.isAtSameMomentAs(now) || dueDate.isAfter(now)) &&
+              (dueDate.isAtSameMomentAs(fourteenDaysFromNow) ||
+                  dueDate.isBefore(fourteenDaysFromNow)) &&
               bill['status'] != 'paid') {
             count++;
           }
@@ -1733,7 +1765,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             // This Month card
                             Expanded(
                               child: Container(
-                                height: 170,
+                                height: 175,
                                 padding: const EdgeInsets.all(15.0),
                                 decoration: BoxDecoration(
                                   color: Colors.white,
@@ -1819,38 +1851,71 @@ class _HomeScreenState extends State<HomeScreen> {
                                               ),
                                             ],
                                           ),
-                                          const SizedBox(height: 10),
-                                          Row(
-                                            children: [
-                                              Icon(
-                                                _isMonthlyIncrease()
-                                                    ? Icons.arrow_downward
-                                                    : Icons.arrow_upward,
-                                                color: _isMonthlyIncrease()
-                                                    ? Colors.red
-                                                    : Colors.green,
-                                                size: 16,
-                                              ),
-                                              const SizedBox(width: 6),
-                                              Text(
-                                                '${_calculateMonthlyPercentageChange().abs().toStringAsFixed(1)}%',
-                                                style: TextStyle(
-                                                  fontSize: 14,
-                                                  fontWeight: FontWeight.w500,
-                                                  color: _isMonthlyIncrease()
+                                          const SizedBox(height: 12),
+                                          Container(
+                                            constraints: const BoxConstraints(
+                                              minWidth: 150,
+                                            ),
+                                            child: Row(
+                                              children: [
+                                                Icon(
+                                                  _calculateMonthlyDifference() >
+                                                          0
+                                                      ? Icons.arrow_upward
+                                                      : Icons.trending_down,
+                                                  color:
+                                                      _calculateMonthlyDifference() >
+                                                          0
                                                       ? Colors.red
                                                       : Colors.green,
+                                                  size: 16,
                                                 ),
-                                              ),
-                                              const SizedBox(width: 4),
-                                              Text(
-                                                'than last month',
-                                                style: TextStyle(
-                                                  fontSize: 10,
-                                                  color: Colors.grey[600],
+                                                const SizedBox(width: 6),
+                                                Expanded(
+                                                  child: Text.rich(
+                                                    TextSpan(
+                                                      children: [
+                                                        // Bold amount
+                                                        TextSpan(
+                                                          text:
+                                                              '\$${_calculateMonthlyDifference().abs().toStringAsFixed(2)} ',
+                                                          style:
+                                                              const TextStyle(
+                                                                fontSize: 13,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .bold,
+                                                                color: Colors
+                                                                    .black87,
+                                                              ),
+                                                        ),
+                                                        // Normal text
+                                                        TextSpan(
+                                                          text:
+                                                              _calculateMonthlyDifference() >
+                                                                  0
+                                                              ? 'more than last month'
+                                                              : 'less than last month',
+                                                          style:
+                                                              const TextStyle(
+                                                                fontSize: 13,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .normal,
+                                                                color: Colors
+                                                                    .black87,
+                                                              ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    softWrap: true,
+                                                    maxLines: 2,
+                                                    overflow:
+                                                        TextOverflow.visible,
+                                                  ),
                                                 ),
-                                              ),
-                                            ],
+                                              ],
+                                            ),
                                           ),
                                         ],
                                       ),
@@ -1865,7 +1930,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             // Next 14 days card
                             Expanded(
                               child: Container(
-                                height: 170,
+                                height: 175,
                                 padding: const EdgeInsets.all(15.0),
                                 decoration: BoxDecoration(
                                   color: Colors.white,
@@ -1974,43 +2039,86 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    _buildActionButton(
-                      icon: Icons.analytics,
-                      label: "Analytics",
-                      bgColor: const Color(0xFFE3F2FD),
-                      iconColor: const Color(0xFF1565C0),
-                      onTap: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Analytics coming soon!'),
-                          ),
-                        );
-                      },
+                    Expanded(
+                      child: _buildActionButton(
+                        icon: Icons.analytics,
+                        label: "Analytics",
+                        bgColor: const Color(0xFFE3F2FD),
+                        iconColor: const Color(0xFF1565C0),
+                        onTap: () {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Analytics coming soon!'),
+                            ),
+                          );
+                        },
+                      ),
                     ),
                     SizedBox(width: 10),
-                    _buildActionButton(
-                      icon: Icons.receipt_long,
-                      label: "All Bills",
-                      bgColor: const Color(0xFFE8F5E8),
-                      iconColor: const Color(0xFF2E7D32),
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (_) => AllBillsScreen()),
-                        );
-                      },
+                    Expanded(
+                      child: _buildActionButton(
+                        icon: Icons.receipt_long,
+                        label: "All Bills",
+                        bgColor: const Color(0xFFE8F5E8),
+                        iconColor: const Color(0xFF2E7D32),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => AllBillsScreen()),
+                          );
+                        },
+                      ),
                     ),
                     SizedBox(width: 10),
-
-                    _buildActionButton(
-                      icon: Icons.add,
-                      label: "Add Bill",
-                      bgColor: const Color(0xFFFFF3E0),
-                      iconColor: const Color(0xFFEF6C00),
-                      onTap: () => _showAddBillBottomSheet(context),
+                    Expanded(
+                      child: _buildActionButton(
+                        icon: Icons.add,
+                        label: "Add Bill",
+                        bgColor: const Color(0xFFFFF3E0),
+                        iconColor: const Color(0xFFEF6C00),
+                        onTap: () => _showAddBillBottomSheet(context),
+                      ),
                     ),
                   ],
                 ),
+              ),
+
+              // Category Tabs Section
+              const SizedBox(height: 20),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Categories',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      height: 50,
+                      child: Scrollbar(
+                        thumbVisibility: true,
+                        thickness: 4,
+                        radius: const Radius.circular(2),
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(children: _buildCategoryTabsList()),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              // Category Content
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: _buildCategoryContent(),
               ),
             ],
           ),
@@ -2062,6 +2170,781 @@ class _HomeScreenState extends State<HomeScreen> {
                 fontSize: 11,
                 color: iconColor,
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Category Tabs and Content Methods
+  List<Widget> _buildCategoryTabsList() {
+    List<Widget> tabs = [];
+
+    // "All" tab
+    tabs.add(
+      Padding(
+        padding: const EdgeInsets.only(right: 8),
+        child: _buildCategoryTab(
+          title: 'All',
+          isSelected: _selectedCategory == 'all',
+          onTap: () {
+            setState(() {
+              _selectedCategory = 'all';
+            });
+          },
+        ),
+      ),
+    );
+
+    // Category tabs
+    for (var category in Category.defaultCategories) {
+      tabs.add(
+        Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: _buildCategoryTab(
+            title: category.name,
+            isSelected: _selectedCategory == category.id,
+            onTap: () {
+              setState(() {
+                _selectedCategory = category.id;
+              });
+            },
+          ),
+        ),
+      );
+    }
+
+    return tabs;
+  }
+
+  Widget _buildCategoryTabs() {
+    return Container(
+      height: 40,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        itemCount: Category.defaultCategories.length + 1, // +1 for "All"
+        itemBuilder: (context, index) {
+          if (index == 0) {
+            // "All" tab
+            return Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: _buildCategoryTab(
+                title: 'All',
+                isSelected: _selectedCategory == 'all',
+                onTap: () {
+                  setState(() {
+                    _selectedCategory = 'all';
+                  });
+                },
+              ),
+            );
+          } else {
+            final category = Category.defaultCategories[index - 1];
+            return Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: _buildCategoryTab(
+                title: category.name,
+                isSelected: _selectedCategory == category.id,
+                onTap: () {
+                  setState(() {
+                    _selectedCategory = category.id;
+                  });
+                },
+              ),
+            );
+          }
+        },
+      ),
+    );
+  }
+
+  Widget _buildCategoryTab({
+    required String title,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? null : Colors.white,
+          gradient: isSelected
+              ? LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  stops: const [0.0, 0.5, 1.0],
+                  colors: [
+                    HSLColor.fromAHSL(1.0, 152, 0.76, 0.36).toColor(),
+                    HSLColor.fromAHSL(1.0, 200, 0.85, 0.75).toColor(),
+                    HSLColor.fromAHSL(1.0, 270, 0.5, 0.75).toColor(),
+                  ],
+                )
+              : null,
+          borderRadius: BorderRadius.circular(20),
+          border: isSelected
+              ? null
+              : Border.all(color: Colors.grey[300]!, width: 1),
+          boxShadow: isSelected
+              ? [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.2),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : null,
+        ),
+        child: Text(
+          title,
+          style: TextStyle(
+            color: isSelected ? Colors.white : Colors.black87,
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCategoryContent() {
+    if (_selectedCategory == 'all') {
+      return _buildAllCategoriesContent();
+    } else {
+      return _buildSingleCategoryContent(_selectedCategory);
+    }
+  }
+
+  Widget _buildAllCategoriesContent() {
+    // Get all categories that have bills
+    final categoriesWithBills = <String, List<Map<String, dynamic>>>{};
+
+    for (var bill in _bills) {
+      final categoryId = bill['category'] ?? 'other';
+      if (!categoriesWithBills.containsKey(categoryId)) {
+        categoriesWithBills[categoryId] = [];
+      }
+      categoriesWithBills[categoryId]!.add(bill);
+    }
+
+    // Sort categories by their most upcoming bill
+    final sortedCategories = categoriesWithBills.entries.toList()
+      ..sort((a, b) {
+        final aEarliest = a.value.isEmpty ? null : _parseDueDate(a.value.first);
+        final bEarliest = b.value.isEmpty ? null : _parseDueDate(b.value.first);
+
+        if (aEarliest == null && bEarliest == null) return 0;
+        if (aEarliest == null) return 1;
+        if (bEarliest == null) return -1;
+
+        return aEarliest.compareTo(bEarliest);
+      });
+
+    if (sortedCategories.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.grey[100],
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Center(
+          child: Text(
+            'No bills found in any category',
+            style: TextStyle(color: Colors.grey, fontSize: 16),
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      children: sortedCategories.map((entry) {
+        final categoryId = entry.key;
+        final categoryBills = entry.value;
+        final category = Category.findById(categoryId);
+
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: _buildCategorySection(
+            category: category,
+            bills: categoryBills,
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildSingleCategoryContent(String categoryId) {
+    final categoryBills = _bills
+        .where((bill) => bill['category'] == categoryId)
+        .toList();
+    final category = Category.findById(categoryId);
+
+    if (categoryBills.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.grey[100],
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Center(
+          child: Text(
+            'No bills found in ${category?.name ?? categoryId}',
+            style: const TextStyle(color: Colors.grey, fontSize: 16),
+          ),
+        ),
+      );
+    }
+
+    return _buildCategorySection(category: category, bills: categoryBills);
+  }
+
+  Widget _buildCategorySection({
+    required Category? category,
+    required List<Map<String, dynamic>> bills,
+  }) {
+    // Sort bills by due date
+    bills.sort((a, b) {
+      final aDate = _parseDueDate(a);
+      final bDate = _parseDueDate(b);
+      if (aDate == null && bDate == null) return 0;
+      if (aDate == null) return 1;
+      if (bDate == null) return -1;
+      return aDate.compareTo(bDate);
+    });
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey[300]!),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Category header
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: category?.backgroundColor ?? Colors.grey[100],
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(12),
+              ),
+            ),
+            child: Row(
+              children: [
+                if (category != null)
+                  Icon(category.icon, color: category.color, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  category?.name ?? 'Unknown Category',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                    color: category?.color ?? Colors.black87,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  '${bills.length} bill${bills.length != 1 ? 's' : ''}',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                ),
+              ],
+            ),
+          ),
+          // Bills list
+          ListView.separated(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: bills.length,
+            separatorBuilder: (context, index) =>
+                Divider(height: 1, color: Colors.grey[200]),
+            itemBuilder: (context, index) {
+              final bill = bills[index];
+              return _buildBillItem(bill);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBillItem(Map<String, dynamic> bill) {
+    final dueDate = _parseDueDate(bill);
+    final now = DateTime.now();
+    final isOverdue =
+        dueDate != null && dueDate.isBefore(now) && bill['status'] != 'paid';
+    final isPaid = bill['status'] == 'paid';
+    final billIndex = _bills.indexOf(bill);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Card(
+        elevation: 3,
+        shadowColor: Colors.black.withOpacity(0.1),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(
+            color: isPaid
+                ? Colors.green.withOpacity(0.3)
+                : (isOverdue
+                      ? Colors.red.withOpacity(0.3)
+                      : Colors.orange.withOpacity(0.3)),
+            width: 1,
+          ),
+        ),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Colors.white,
+                isPaid
+                    ? Colors.green.withOpacity(0.05)
+                    : (isOverdue
+                          ? Colors.red.withOpacity(0.05)
+                          : Colors.orange.withOpacity(0.05)),
+              ],
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: isPaid
+                            ? Colors.green.withOpacity(0.1)
+                            : (isOverdue
+                                  ? Colors.red.withOpacity(0.1)
+                                  : Colors.orange.withOpacity(0.1)),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        isPaid
+                            ? Icons.check_circle
+                            : (isOverdue ? Icons.error : Icons.access_time),
+                        color: isPaid
+                            ? Colors.green
+                            : (isOverdue ? Colors.red : Colors.orange),
+                        size: 20,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            bill['name'] ?? 'Unknown Bill',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                              color: Colors.black87,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.calendar_today,
+                                size: 14,
+                                color: Colors.grey[600],
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                dueDate != null
+                                    ? _formatDate(dueDate)
+                                    : 'No due date',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          '\$${_parseAmount(bill['amount']).toStringAsFixed(2)}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18,
+                            color: Colors.black87,
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isPaid
+                                ? Colors.green
+                                : (isOverdue ? Colors.red : Colors.orange),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            isPaid
+                                ? 'Paid'
+                                : (isOverdue ? 'Overdue' : 'Upcoming'),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    if (!isPaid) ...[
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => _markAsPaid(billIndex),
+                          icon: const Icon(Icons.check, size: 16),
+                          label: const Text('Mark as Paid'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.green,
+                            side: const BorderSide(color: Colors.green),
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _showQuickEditSheet(context, bill),
+                        icon: const Icon(Icons.edit, size: 16),
+                        label: const Text('Edit'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.blue,
+                          side: const BorderSide(color: Colors.blue),
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: IconButton(
+                        onPressed: () => _deleteBill(billIndex),
+                        icon: const Icon(Icons.delete, size: 16),
+                        color: Colors.red,
+                        constraints: const BoxConstraints(
+                          minWidth: 32,
+                          minHeight: 32,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Helper method to format date
+  String _formatDate(DateTime date) {
+    final now = DateTime.now();
+    final difference = date.difference(now);
+
+    if (difference.inDays == 0) return 'Today';
+    if (difference.inDays == 1) return 'Tomorrow';
+    if (difference.inDays == -1) return 'Yesterday';
+    if (difference.inDays > 0 && difference.inDays <= 7) {
+      return '${difference.inDays} days from now';
+    }
+    if (difference.inDays < 0 && difference.inDays >= -7) {
+      return '${difference.inDays.abs()} days ago';
+    }
+
+    return '${date.day}/${date.month}/${date.year}';
+  }
+
+  // Mark bill as paid
+  void _markAsPaid(int billIndex) {
+    if (billIndex >= 0 && billIndex < _bills.length) {
+      setState(() {
+        _bills[billIndex]['status'] = 'paid';
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${_bills[billIndex]['name']} marked as paid!'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  // Delete bill
+  void _deleteBill(int billIndex) {
+    if (billIndex >= 0 && billIndex < _bills.length) {
+      final billName = _bills[billIndex]['name'] ?? 'Unknown Bill';
+
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Delete Bill'),
+          content: Text('Are you sure you want to delete "$billName"?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _bills.removeAt(billIndex);
+                });
+                Navigator.pop(context);
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('$billName deleted successfully!'),
+                    backgroundColor: Colors.red,
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              },
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('Delete'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  // Show quick edit bottom sheet
+  void _showQuickEditSheet(BuildContext context, Map<String, dynamic> bill) {
+    final nameController = TextEditingController(text: bill['name'] ?? '');
+    final amountController = TextEditingController(text: bill['amount'] ?? '');
+    final dueDateController = TextEditingController(
+      text: bill['dueDate'] ?? '',
+    );
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Quick Edit',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.close),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+
+            // Name field
+            TextField(
+              controller: nameController,
+              decoration: const InputDecoration(
+                labelText: 'Bill Name',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.description),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Amount field
+            TextField(
+              controller: amountController,
+              decoration: const InputDecoration(
+                labelText: 'Amount',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.attach_money),
+                prefixText: '\$',
+              ),
+              keyboardType: TextInputType.numberWithOptions(decimal: true),
+            ),
+            const SizedBox(height: 16),
+
+            // Due date field
+            TextField(
+              controller: dueDateController,
+              decoration: const InputDecoration(
+                labelText: 'Due Date',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.calendar_today),
+                hintText: 'DD/MM/YYYY',
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // Action buttons
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () {
+                      final billIndex = _bills.indexOf(bill);
+                      if (billIndex != -1) {
+                        setState(() {
+                          _bills[billIndex]['name'] = nameController.text;
+                          _bills[billIndex]['amount'] = amountController.text;
+                          _bills[billIndex]['dueDate'] = dueDateController.text;
+                        });
+
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              '${nameController.text} updated successfully!',
+                            ),
+                            backgroundColor: Colors.green,
+                            duration: const Duration(seconds: 2),
+                          ),
+                        );
+                      }
+                      Navigator.pop(context);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: kPrimaryColor,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('Save Changes'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Show bill details modal
+  void _showBillDetails(BuildContext context, Map<String, dynamic> bill) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Bill Details',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.close),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Text(
+              bill['name'] ?? 'Unknown Bill',
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Amount: \$${_parseAmount(bill['amount']).toStringAsFixed(2)}',
+              style: const TextStyle(fontSize: 16, color: Colors.black87),
+            ),
+            if (bill['dueDate'] != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Due Date: ${bill['dueDate']}',
+                style: const TextStyle(fontSize: 16, color: Colors.black87),
+              ),
+            ],
+            if (bill['category'] != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Category: ${bill['category']}',
+                style: const TextStyle(fontSize: 16, color: Colors.black87),
+              ),
+            ],
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      // TODO: Implement edit functionality
+                    },
+                    child: const Text('Edit'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      // TODO: Implement delete functionality
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('Delete'),
+                  ),
+                ),
+              ],
             ),
           ],
         ),

@@ -77,17 +77,23 @@ class _ChangingSubtitleState extends State<ChangingSubtitle> {
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      _currentSubtitle,
-      style: TextStyle(
-        color: Colors.white70,
-        fontSize: 15,
-        fontWeight: FontWeight.w500,
-        letterSpacing: -0.2,
-        height: 1.3,
+    return SizedBox(
+      height: 20, // 👈 lock subtitle height (tweak as needed)
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Text(
+          _currentSubtitle.isEmpty ? " " : _currentSubtitle, // 👈 keep space
+          style: const TextStyle(
+            color: Colors.white70,
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
+            letterSpacing: -0.2,
+            height: 1.3,
+          ),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
       ),
-      maxLines: 2, // allow wrapping
-      overflow: TextOverflow.ellipsis,
     );
   }
 }
