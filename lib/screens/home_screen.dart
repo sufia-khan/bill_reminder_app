@@ -1599,29 +1599,55 @@ class _HomeScreenState extends State<HomeScreen> {
     return total;
   }
 
-  // Helper method for upcoming bills count (next 14 days)
-  int _getUpcoming14DaysCount() {
+  // Helper method for upcoming bills count (next 7 days)
+  int _getUpcoming7DaysCount() {
     int count = 0;
     final now = DateTime.now();
-    final fourteenDaysFromNow = now.add(const Duration(days: 14));
+    final sevenDaysFromNow = now.add(const Duration(days: 7));
 
     for (var bill in _bills) {
       try {
         final dueDate = _parseDueDate(bill);
         if (dueDate != null) {
-          // Count bills that are due within the next 14 days (inclusive) and not yet paid
+          // Count bills that are due within the next 7 days (inclusive) and not yet paid
           if ((dueDate.isAtSameMomentAs(now) || dueDate.isAfter(now)) &&
-              (dueDate.isAtSameMomentAs(fourteenDaysFromNow) ||
-                  dueDate.isBefore(fourteenDaysFromNow)) &&
+              (dueDate.isAtSameMomentAs(sevenDaysFromNow) ||
+                  dueDate.isBefore(sevenDaysFromNow)) &&
               bill['status'] != 'paid') {
             count++;
           }
         }
       } catch (e) {
-        debugPrint('Error getting upcoming 14 days count: $e');
+        debugPrint('Error getting upcoming 7 days count: $e');
       }
     }
     return count;
+  }
+
+  // Helper method to get total amount for upcoming bills (next 7 days)
+  double _getUpcoming7DaysTotal() {
+    double total = 0.0;
+    final now = DateTime.now();
+    final sevenDaysFromNow = now.add(const Duration(days: 7));
+
+    for (var bill in _bills) {
+      try {
+        final dueDate = _parseDueDate(bill);
+        if (dueDate != null) {
+          // Sum bills that are due within the next 7 days (inclusive) and not yet paid
+          if ((dueDate.isAtSameMomentAs(now) || dueDate.isAfter(now)) &&
+              (dueDate.isAtSameMomentAs(sevenDaysFromNow) ||
+                  dueDate.isBefore(sevenDaysFromNow)) &&
+              bill['status'] != 'paid') {
+            final amount = double.tryParse(bill['amount']?.toString() ?? '0') ?? 0.0;
+            total += amount;
+          }
+        }
+      } catch (e) {
+        debugPrint('Error calculating upcoming 7 days total: $e');
+      }
+    }
+    return total;
   }
 
   @override
@@ -1966,7 +1992,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                         ),
                                         const SizedBox(width: 8),
                                         const Text(
-                                          "Next 14 Days",
+                                          "Next 7 Days",
                                           style: TextStyle(
                                             color: Colors.grey,
                                             fontSize: 12,
@@ -1977,21 +2003,45 @@ class _HomeScreenState extends State<HomeScreen> {
                                     ),
                                     const SizedBox(height: 16),
                                     Expanded(
-                                      child: Row(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          const Icon(
-                                            Icons.calendar_today,
-                                            color: Colors.orange,
-                                            size: 20,
+                                          Row(
+                                            children: [
+                                              const Icon(
+                                                Icons.calendar_today,
+                                                color: Colors.orange,
+                                                size: 20,
+                                              ),
+                                              const SizedBox(width: 10),
+                                              Text(
+                                                '${_getUpcoming7DaysCount()} bills',
+                                                style: const TextStyle(
+                                                  fontSize: 24,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.black,
+                                                ),
+                                              ),
+                                            ],
                                           ),
-                                          const SizedBox(width: 10),
-                                          Text(
-                                            '${_getUpcoming14DaysCount()} bills',
-                                            style: const TextStyle(
-                                              fontSize: 24,
-                                              fontWeight: FontWeight.bold,
-                                              color: Colors.black,
-                                            ),
+                                          const SizedBox(height: 8),
+                                          Row(
+                                            children: [
+                                              const Icon(
+                                                Icons.attach_money,
+                                                color: Colors.orange,
+                                                size: 16,
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                '\$${_getUpcoming7DaysTotal().toStringAsFixed(2)}',
+                                                style: const TextStyle(
+                                                  fontSize: 16,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: Colors.black87,
+                                                ),
+                                              ),
+                                            ],
                                           ),
                                         ],
                                       ),
@@ -2496,18 +2546,19 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Colors.white,
-                isPaid
-                    ? Colors.green.withOpacity(0.05)
+            color: Colors.white,
+            boxShadow: [
+              BoxShadow(
+                color: isPaid
+                    ? Colors.green.withOpacity(0.08)
                     : (isOverdue
-                          ? Colors.red.withOpacity(0.05)
-                          : Colors.orange.withOpacity(0.05)),
-              ],
-            ),
+                          ? Colors.red.withOpacity(0.08)
+                          : Colors.orange.withOpacity(0.08)),
+                blurRadius: 12,
+                spreadRadius: 1,
+                offset: const Offset(0, 2),
+              ),
+            ],
           ),
           child: Padding(
             padding: const EdgeInsets.all(16),
