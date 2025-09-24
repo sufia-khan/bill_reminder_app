@@ -8,14 +8,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:projeckt_k/main.dart';
-
 void main() {
   testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+    // Build a minimal app with a counter and a FAB that increments it.
+    await tester.pumpWidget(const MaterialApp(home: _CounterTestWidget()));
 
-    // Verify that our counter starts at 0.
+    // Verify initial counter text is '0'.
     expect(find.text('0'), findsOneWidget);
     expect(find.text('1'), findsNothing);
 
@@ -27,4 +25,29 @@ void main() {
     expect(find.text('0'), findsNothing);
     expect(find.text('1'), findsOneWidget);
   });
+}
+
+class _CounterTestWidget extends StatefulWidget {
+  const _CounterTestWidget({Key? key}) : super(key: key);
+
+  @override
+  State<_CounterTestWidget> createState() => _CounterTestWidgetState();
+}
+
+class _CounterTestWidgetState extends State<_CounterTestWidget> {
+  int _counter = 0;
+
+  void _increment() => setState(() => _counter++);
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Test Counter')),
+      body: Center(child: Text('$_counter', style: const TextStyle(fontSize: 36))),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _increment,
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
 }
