@@ -12,8 +12,9 @@ class BillSummaryCard extends StatelessWidget {
     required this.primaryValue,
     this.secondaryAmount,
     this.secondaryText,
+
     // layout heights
-    this.topBoxHeight = 36,
+    this.topBoxHeight = 3,
     this.middleBoxHeight = 70,
     this.bottomBoxHeight = 45,
     // font sizing

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class ChangingSubtitle extends StatefulWidget {
   const ChangingSubtitle({super.key});
@@ -13,8 +14,8 @@ class _ChangingSubtitleState extends State<ChangingSubtitle> {
     "Never miss a due date again",
     "Stay on top of your payments",
     "Track, remind, and relax",
-    "Bills, all in one place", // shorter version
-    "Smart reminders, stress-free", // shorter version
+    "Bills, all in one place",
+    "Smart reminders, stress-free",
     "Pay on time, every time",
     "Simplify your subscriptions",
     "No more late fees",
@@ -78,14 +79,14 @@ class _ChangingSubtitleState extends State<ChangingSubtitle> {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 20, // 👈 lock subtitle height (tweak as needed)
+      height: 22, // slightly taller to fit 2 lines nicely
       child: Align(
         alignment: Alignment.centerLeft,
         child: Text(
-          _currentSubtitle.isEmpty ? " " : _currentSubtitle, // 👈 keep space
-          style: const TextStyle(
-            color: Colors.black87,
-            fontSize: 15,
+          _currentSubtitle.isEmpty ? " " : _currentSubtitle,
+          style: GoogleFonts.poppins(
+            color: Colors.black54,  // slightly lighter than title
+            fontSize: 14,           // smaller than main title
             fontWeight: FontWeight.w500,
             letterSpacing: -0.2,
             height: 1.3,

@@ -31,7 +31,6 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Update the sync service context when navigating
     _syncService.setContext(context);
   }
 
@@ -42,16 +41,26 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
     AllBillsScreen(),
     SettingsScreen(),
   ];
+
+  // Lighter gradient for icons: increased lightness and a touch of opacity
+  List<Color> get _navGradientColors => [
+    HSLColor.fromAHSL(1.0, 250, 0.84, 0.74).toColor().withOpacity(0.95),
+    HSLColor.fromAHSL(1.0, 280, 0.75, 0.80).toColor().withOpacity(0.95),
+  ];
+
+  // Even lighter background tint for the floating button's shadow / ring
+  List<Color> get _navGradientColorsSoft => [
+    HSLColor.fromAHSL(1.0, 250, 0.84, 0.78).toColor().withOpacity(0.9),
+    HSLColor.fromAHSL(1.0, 280, 0.75, 0.83).toColor().withOpacity(0.9),
+  ];
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: _screens[_currentIndex],
       extendBody: true,
       bottomNavigationBar: Container(
-        padding: const EdgeInsets.symmetric(
-          vertical: 4,
-          horizontal: 8,
-        ), // 🔹 less vertical padding
+        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: const BorderRadius.only(
@@ -59,11 +68,12 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
             topRight: Radius.circular(20),
           ),
           boxShadow: [
+            // lighter shadow
             BoxShadow(
-              color: Colors.blue.withOpacity(0.5),
-              blurRadius: 20,
-              spreadRadius: 2,
-              offset: const Offset(0, 8),
+              color: _navGradientColors.first.withOpacity(0.18),
+              blurRadius: 18,
+              spreadRadius: 1,
+              offset: const Offset(0, 6),
             ),
           ],
         ),
@@ -73,7 +83,7 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
             _buildNavItem(Icons.home, 0, "Home"),
             _buildNavItem(Icons.analytics, 1, "Analytics"),
 
-            // Floating center button
+            // Floating center button (lighter gradient overall)
             GestureDetector(
               onTap: () {
                 if (_currentIndex == 0) {
@@ -88,34 +98,40 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
                 }
               },
               child: Container(
-                width: 54, // 🔹 smaller size
+                width: 54,
                 height: 54,
                 decoration: BoxDecoration(
+                  // a soft/lighter gradient for the circular background
                   gradient: LinearGradient(
-                    colors: [
-                      HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor(),
-                      HSLColor.fromAHSL(1.0, 236, 0.89, 0.75).toColor(),
-                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: _navGradientColorsSoft,
                   ),
                   shape: BoxShape.circle,
                   boxShadow: [
                     BoxShadow(
-                      color: HSLColor.fromAHSL(
-                        1.0,
-                        236,
-                        0.89,
-                        0.65,
-                      ).toColor().withOpacity(0.5),
-                      blurRadius: 18,
+                      color: _navGradientColorsSoft.first.withOpacity(0.22),
+                      blurRadius: 16,
                       spreadRadius: 2,
+                      offset: const Offset(0, 6),
                     ),
                   ],
                 ),
-                child: const Icon(
-                  Icons.add,
-                  color: Colors.white,
-                  size: 26,
-                ), // 🔹 smaller icon
+                child: Center(
+                  child: ShaderMask(
+                    blendMode: BlendMode.srcIn,
+                    shaderCallback: (bounds) => LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: _navGradientColors,
+                    ).createShader(bounds),
+                    child: const Icon(
+                      Icons.add,
+                      size: 26,
+                      color: Colors.white, // shader will tint this
+                    ),
+                  ),
+                ),
               ),
             ),
 
@@ -135,13 +151,13 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeOut,
-        padding: const EdgeInsets.all(6), // 🔹 smaller padding
+        padding: const EdgeInsets.all(6),
         decoration: BoxDecoration(
           color: Colors.transparent,
           borderRadius: BorderRadius.circular(12),
           border: isActive
               ? Border.all(
-                  color: HSLColor.fromAHSL(1.0, 250, 0.84, 0.60).toColor(),
+                  color: _navGradientColors.first.withOpacity(0.45),
                   width: 1.2,
                 )
               : null,
@@ -149,17 +165,14 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
         child: ShaderMask(
           blendMode: BlendMode.srcIn,
           shaderCallback: (bounds) => LinearGradient(
-            colors: [
-              HSLColor.fromAHSL(1.0, 250, 0.84, 0.60).toColor(),
-              HSLColor.fromAHSL(1.0, 280, 0.75, 0.65).toColor(),
-            ],
+            colors: _navGradientColors,
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ).createShader(bounds),
           child: Icon(
             icon,
             size: 24,
-            color: Colors.white, // Gradient will override this
+            color: Colors.white, // gradient will replace this
           ),
         ),
       ),

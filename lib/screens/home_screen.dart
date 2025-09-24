@@ -1,15 +1,13 @@
 import 'dart:async';
-import 'package:auto_size_text/auto_size_text.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:projeckt_k/screens/all_bills_screen.dart';
 import 'package:projeckt_k/screens/profile_screen.dart';
-import 'package:projeckt_k/services/auth_service.dart';
 import 'package:projeckt_k/services/subscription_service.dart';
 import 'package:projeckt_k/services/notification_service.dart';
 import 'package:projeckt_k/models/category_model.dart';
 import 'package:projeckt_k/widgets/subtitle_changing.dart';
 import 'package:projeckt_k/widgets/bill_summary_cards.dart';
+import 'package:projeckt_k/widgets/bill_item_widget.dart';
 
 final Color kPrimaryColor = HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor();
 final Color bgUpcomingMuted = HSLColor.fromAHSL(
@@ -351,168 +349,37 @@ class HomeScreenState extends State<HomeScreen> {
                       itemCount: filteredBills.length,
                       itemBuilder: (context, index) {
                         final bill = filteredBills[index];
-                        return _buildBillCard(context, bill, category);
-                      },
-                    ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBillCard(
-    BuildContext context,
-    Map<String, dynamic> bill,
-    String category,
-  ) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        bill['name'] ?? '',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black87,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Due: ${bill['dueDate'] ?? ''}${bill['dueTime'] != null ? ' ${bill['dueTime']}' : ''}',
-                        style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                      ),
-                    ],
-                  ),
-                ),
-                Text(
-                  '\$${bill['amount'] ?? ''}',
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black87,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Column(
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () {
-                          Navigator.pop(context);
-                          _editBill(bill['originalIndex']);
-                        },
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          side: BorderSide(color: Colors.grey[400]!),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.edit, size: 16, color: Colors.grey[700]),
-                            const SizedBox(width: 6),
-                            const Text('Edit', style: TextStyle(fontSize: 14)),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: () async {
-                          bool? confirm = await _showDeleteConfirmDialog(
-                            context,
-                          );
-                          if (confirm == true) {
-                            await _deleteSubscription(bill['originalIndex']);
-                            Navigator.pop(context);
-                            _loadSubscriptions(); // Refresh data
-                          }
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red[50],
-                          foregroundColor: Colors.red[700],
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.delete, size: 16),
-                            const SizedBox(width: 6),
-                            const Text(
-                              'Delete',
-                              style: TextStyle(fontSize: 14),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                if (category.toLowerCase() != 'paid') ...[
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: () async {
-                        bool? confirm = await _showMarkAsPaidConfirmDialog(
-                          context,
-                          bill['name'] ?? 'this bill',
+                        return BillItemWidget(
+                          bill: {...bill, 'index': index},
+                          onMarkAsPaid: (billIndex) async {
+                            bool? confirm = await _showMarkAsPaidConfirmDialog(
+                              context,
+                              bill['name'] ?? 'this bill',
+                            );
+                            if (confirm == true) {
+                              await _markBillAsPaid(billIndex);
+                              _loadSubscriptions();
+                            }
+                          },
+                          onDelete: (billIndex) async {
+                            bool? confirm = await _showDeleteConfirmDialog(
+                              context,
+                            );
+                            if (confirm == true) {
+                              await _deleteSubscription(billIndex);
+                              _loadSubscriptions();
+                            }
+                          },
+                          onEdit: (billData) {
+                            _editBill(billData['originalIndex']);
+                          },
+                          onShowDetails: (billData) {
+                            // Show bill details if needed
+                          },
+                          useHomeScreenEdit: true,
                         );
-                        if (confirm == true) {
-                          await _markBillAsPaid(bill['originalIndex']);
-                          Navigator.pop(context);
-                          _loadSubscriptions(); // Refresh data
-                        }
                       },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green[50],
-                        foregroundColor: Colors.green[700],
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.check_circle, size: 16),
-                          const SizedBox(width: 6),
-                          const Text(
-                            'Mark as Paid',
-                            style: TextStyle(fontSize: 14),
-                          ),
-                        ],
-                      ),
                     ),
-                  ),
-                ],
-              ],
             ),
           ],
         ),
@@ -547,7 +414,7 @@ class HomeScreenState extends State<HomeScreen> {
     if (index < 0 || index >= _bills.length) return;
 
     final bill = _bills[index];
-    _showEditBillScreen(context, bill, index);
+    showAddBillBottomSheet(context, bill: bill, editIndex: index);
   }
 
   Future<bool?> _showMarkAsPaidConfirmDialog(
@@ -1205,27 +1072,147 @@ class HomeScreenState extends State<HomeScreen> {
   Future<void> _updateBill(int index, Map<String, dynamic> updatedBill) async {
     if (index < 0 || index >= _bills.length) return;
 
-    try {
-      // In a real app, you would update the bill in the database
-      // For now, we'll just update the local list and show a success message
-      setState(() {
-        _bills[index] = Map.from(_bills[index])..addAll(updatedBill);
-        _checkForOverdueBills(); // Immediate check for overdue status
-      });
+    // Check network status first
+    await _checkConnectivity();
+    debugPrint('Updating bill. Network status: $_isOnline');
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Bill updated successfully!'),
-          backgroundColor: Colors.green,
-        ),
-      );
+    // Get the original bill for reference
+    final originalBill = _bills[index];
+    final billId = originalBill['id'];
+
+    try {
+      if (_isOnline && billId != null) {
+        // Try to update in Firebase first
+        await _subscriptionService.updateSubscription(billId, updatedBill);
+
+        // If successful, update local list
+        if (mounted) {
+          setState(() {
+            _bills[index] = Map.from(originalBill)..addAll(updatedBill);
+            _checkForOverdueBills(); // Immediate check for overdue status
+          });
+
+          // Update reminders if needed
+          await _updateBillReminders(_bills[index]);
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('${updatedBill['name']} updated successfully!'),
+              backgroundColor: Colors.green,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          );
+        }
+      } else {
+        // Offline or no ID: Update locally only
+        if (mounted) {
+          setState(() {
+            _bills[index] = Map.from(originalBill)..addAll(updatedBill);
+            _checkForOverdueBills(); // Immediate check for overdue status
+          });
+
+          // Update reminders locally
+          await _updateBillReminders(_bills[index]);
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '${updatedBill['name']} updated locally. Will sync when online.',
+              ),
+              backgroundColor: Colors.orange,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          );
+        }
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to update bill: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      // Re-check connectivity to make sure it's actually offline
+      await _checkConnectivity();
+
+      if (!_isOnline) {
+        // Only show offline message if actually offline
+        if (mounted) {
+          setState(() {
+            _bills[index] = Map.from(originalBill)..addAll(updatedBill);
+            _checkForOverdueBills(); // Immediate check for overdue status
+          });
+
+          // Update reminders locally
+          await _updateBillReminders(_bills[index]);
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '${updatedBill['name']} updated locally. Will sync when online.',
+              ),
+              backgroundColor: Colors.orange,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          );
+        }
+      } else {
+        // If online but Firebase failed, show error message
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to update bill. Please try again.'),
+              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  /// Update reminders for a bill when it's edited
+  Future<void> _updateBillReminders(Map<String, dynamic> bill) async {
+    try {
+      final notificationService = NotificationService();
+
+      // Cancel existing reminders for this bill
+      if (bill['id'] != null) {
+        await notificationService.cancelNotification(
+          int.tryParse(bill['id'].toString()) ?? 0,
+        );
+      }
+
+      // Schedule new reminder if needed
+      if (bill['reminder'] != null &&
+          bill['reminder'] != 'No reminder' &&
+          bill['status'] != 'paid') {
+        final dueDateTime = _parseDueDate(bill);
+        if (dueDateTime != null) {
+          final billId = bill['id'] != null
+              ? int.tryParse(bill['id'].toString()) ??
+                    DateTime.now().millisecondsSinceEpoch
+              : DateTime.now().millisecondsSinceEpoch;
+
+          await notificationService.scheduleBillReminder(
+            id: billId,
+            title: bill['name'] ?? 'Unknown Bill',
+            body: 'Payment of \$${bill['amount'] ?? '0.0'} is due',
+            dueDate: dueDateTime,
+            reminderPreference: bill['reminder'] ?? 'Same day',
+            payload: bill['id']?.toString(),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Error updating bill reminders: $e');
+      // Don't show error to user for reminder issues, as the main update was successful
     }
   }
 
@@ -1308,130 +1295,20 @@ class HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Helper methods for statistics
-  Widget _buildAnimatedStatCard(
-    String title,
-    String count,
-    String amount,
-    Color backgroundColor,
-    IconData icon,
-    Color iconColor,
-  ) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      curve: Curves.easeInOut,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () {
-            _showBillsDetailScreen(context, title);
-          },
-          borderRadius: BorderRadius.circular(12),
-          splashColor: iconColor.withOpacity(0.1),
-          highlightColor: iconColor.withOpacity(0.05),
-          child: Container(
-            width: double.infinity,
-            height: 90, // 🔹 Reduced height
-            padding: const EdgeInsets.all(8), // tighter padding
-            decoration: BoxDecoration(
-              color: backgroundColor,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: iconColor.withOpacity(0.25),
-                width: 1.5,
-              ),
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [backgroundColor, backgroundColor.withOpacity(0.7)],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.08),
-                  blurRadius: 8,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment:
-                  MainAxisAlignment.spaceEvenly, // 🔹 Distributes evenly
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: iconColor.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Icon(
-                        icon,
-                        color: iconColor,
-                        size: 18,
-                      ), // smaller icon
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        title,
-                        style: const TextStyle(
-                          color: Colors.black87,
-                          fontSize: 13, // smaller text
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.3,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      count,
-                      style: TextStyle(
-                        fontSize: 20, // smaller than before
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black,
-                        shadows: [
-                          Shadow(
-                            color: iconColor.withOpacity(0.12),
-                            blurRadius: 2,
-                            offset: const Offset(0, 1),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        amount,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.black87,
-                          overflow: TextOverflow.ellipsis,
-                          shadows: [
-                            Shadow(
-                              color: iconColor.withOpacity(0.08),
-                              blurRadius: 1,
-                              offset: const Offset(0, 1),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
+  // Helper method to calculate reminder date based on reminder preference
+  DateTime _calculateReminderDate(DateTime dueDate, String reminderPreference) {
+    switch (reminderPreference) {
+      case 'Same day':
+        return dueDate;
+      case '1 day before':
+        return dueDate.subtract(const Duration(days: 1));
+      case '3 days before':
+        return dueDate.subtract(const Duration(days: 3));
+      case '1 week before':
+        return dueDate.subtract(const Duration(days: 7));
+      default:
+        return dueDate;
+    }
   }
 
   double _parseAmount(dynamic amount) {
@@ -1471,36 +1348,6 @@ class HomeScreenState extends State<HomeScreen> {
     return total;
   }
 
-  double _calculateLastMonthTotal() {
-    double total = 0;
-    final now = DateTime.now();
-    final lastMonth = now.month == 1 ? 12 : now.month - 1;
-    final lastMonthYear = now.month == 1 ? now.year - 1 : now.year;
-
-    for (var bill in _bills) {
-      try {
-        final amount = _parseAmount(bill['amount']);
-        final dueDateStr = bill['dueDate']?.toString() ?? '';
-
-        if (dueDateStr.isNotEmpty) {
-          final parts = dueDateStr.split('/');
-          if (parts.length == 3) {
-            final day = int.parse(parts[0]);
-            final month = int.parse(parts[1]);
-            final year = int.parse(parts[2]);
-
-            if (month == lastMonth && year == lastMonthYear) {
-              total += amount;
-            }
-          }
-        }
-      } catch (e) {
-        debugPrint('Error calculating last month total: $e');
-      }
-    }
-    return total;
-  }
-
   double _calculateMonthlyDifference() {
     // Calculate actual difference based on last month's data
     final now = DateTime.now();
@@ -1533,155 +1380,6 @@ class HomeScreenState extends State<HomeScreen> {
     }
 
     return thisMonthTotal - lastMonthTotal;
-  }
-
-  double _calculateMonthlyPercentageChange() {
-    double thisMonthTotal = _calculateMonthlyTotal();
-    double difference = _calculateMonthlyDifference();
-
-    if (thisMonthTotal == 0) return 0;
-
-    return (difference / thisMonthTotal) * 100;
-  }
-
-  bool _isMonthlyIncrease() {
-    return _calculateMonthlyDifference() > 0;
-  }
-
-  int _getUpcomingCount() {
-    int count = 0;
-    final now = DateTime.now();
-    final oneMonthFromNow = now.add(const Duration(days: 30));
-
-    for (var bill in _bills) {
-      try {
-        final dueDate = _parseDueDate(bill);
-        if (dueDate != null) {
-          // Show bills that are due within the next month and not yet paid
-          if (dueDate.isAfter(now) &&
-              dueDate.isBefore(oneMonthFromNow) &&
-              bill['status'] != 'paid') {
-            count++;
-          }
-        }
-      } catch (e) {
-        debugPrint('Error getting upcoming count: $e');
-      }
-    }
-    return count;
-  }
-
-  double _getUpcomingAmount() {
-    double total = 0;
-    final now = DateTime.now();
-    final oneMonthFromNow = now.add(const Duration(days: 30));
-
-    for (var bill in _bills) {
-      try {
-        final amount = _parseAmount(bill['amount']);
-        final dueDate = _parseDueDate(bill);
-
-        if (dueDate != null) {
-          // Show bills that are due within the next month and not yet paid
-          if (dueDate.isAfter(now) &&
-              dueDate.isBefore(oneMonthFromNow) &&
-              bill['status'] != 'paid') {
-            total += amount;
-          }
-        }
-      } catch (e) {
-        debugPrint('Error getting upcoming amount: $e');
-      }
-    }
-    return total;
-  }
-
-  int _getPaidCount() {
-    int count = 0;
-    final now = DateTime.now();
-
-    for (var bill in _bills) {
-      try {
-        // Check if bill is marked as paid and has a paid date
-        if (bill['status'] == 'paid' && bill['paidDate'] != null) {
-          count++;
-        }
-      } catch (e) {
-        debugPrint('Error getting paid count: $e');
-      }
-    }
-    return count;
-  }
-
-  double _getPaidAmount() {
-    double total = 0;
-    final now = DateTime.now();
-
-    for (var bill in _bills) {
-      try {
-        final amount = _parseAmount(bill['amount']);
-
-        // Check if bill is marked as paid and has a paid date
-        if (bill['status'] == 'paid' && bill['paidDate'] != null) {
-          total += amount;
-        }
-      } catch (e) {
-        debugPrint('Error getting paid amount: $e');
-      }
-    }
-    return total;
-  }
-
-  int _getOverdueCount() {
-    int count = 0;
-    final now = DateTime.now();
-    final sixMonthsAgo = now.subtract(
-      const Duration(days: 180),
-    ); // 6 months ago
-
-    for (var bill in _bills) {
-      try {
-        final dueDate = _parseDueDate(bill);
-        if (dueDate != null) {
-          // Show bills that are overdue (before now) and within the last 6 months, and not yet paid
-          if (dueDate.isBefore(now) &&
-              dueDate.isAfter(sixMonthsAgo) &&
-              bill['status'] != 'paid') {
-            count++;
-          }
-        }
-      } catch (e) {
-        debugPrint('Error getting overdue count: $e');
-      }
-    }
-    return count;
-  }
-
-  double _getOverdueAmount() {
-    double total = 0;
-    final now = DateTime.now();
-    final sixMonthsAgo = now.subtract(
-      const Duration(days: 180),
-    ); // 6 months ago
-
-    for (var bill in _bills) {
-      try {
-        final amount = _parseAmount(bill['amount']);
-        final dueDate = _parseDueDate(bill);
-
-        if (dueDate != null) {
-          // Show bills that are overdue (before now) and within the last 6 months, and not yet paid
-          if (dueDate.isBefore(now) &&
-              dueDate.isAfter(sixMonthsAgo) &&
-              bill['status'] != 'paid') {
-            total += amount;
-          }
-        }
-      } catch (e) {
-        debugPrint('Error getting overdue amount: $e');
-      }
-    }
-    return total;
   }
 
   // Helper method for upcoming bills count (next 7 days)
@@ -1736,20 +1434,8 @@ class HomeScreenState extends State<HomeScreen> {
     return total;
   }
 
-  // Get the default notification time from user preferences or use 9:00 AM as fallback
-  Future<TimeOfDay> _getDefaultNotificationTime() async {
-    try {
-      return await NotificationService().getDefaultNotificationTime();
-    } catch (e) {
-      debugPrint('Error getting default notification time: $e');
-      return const TimeOfDay(hour: 9, minute: 0);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final authService = AuthService();
-
     // shared heights you used earlier
     const double sharedTop = 36;
     const double sharedMiddle = 72;
@@ -1808,12 +1494,13 @@ class HomeScreenState extends State<HomeScreen> {
                                 children: [
                                   Text(
                                     'SubManager',
-                                    style: TextStyle(
+                                    style: GoogleFonts.montserrat(
                                       color: Colors.black87,
-                                      fontWeight: FontWeight.bold,
+                                      fontWeight: FontWeight.w600,
                                       fontSize: 23,
                                     ),
                                   ),
+
                                   const SizedBox(height: 2),
                                   const ChangingSubtitle(),
                                 ],
@@ -1907,6 +1594,7 @@ class HomeScreenState extends State<HomeScreen> {
                               ],
                               primaryValue:
                                   "\$${_getUpcoming7DaysTotal().toStringAsFixed(2)}",
+
                               // increase the bottom (count) size here:
                               secondaryText:
                                   "${_getUpcoming7DaysCount()} bills",
@@ -2000,56 +1688,6 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildActionButton({
-    required IconData icon,
-    required String label,
-    required Color bgColor,
-    required Color iconColor,
-    required VoidCallback onTap,
-  }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 8,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: ElevatedButton(
-        onPressed: onTap,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: bgColor,
-          foregroundColor: iconColor,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          elevation: 0,
-          minimumSize: const Size(80, 70),
-          padding: EdgeInsets.zero,
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 28, color: iconColor),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              style: TextStyle(
-                fontWeight: FontWeight.w600,
-                fontSize: 11,
-                color: iconColor,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   // Category Tabs and Content Methods
   List<Widget> _buildCategoryTabsList() {
     List<Widget> tabs = [];
@@ -2089,76 +1727,6 @@ class HomeScreenState extends State<HomeScreen> {
     }
 
     return tabs;
-  }
-
-  Widget _buildCategoryTabs() {
-    return SizedBox(
-      height: 40,
-      child: Stack(
-        children: [
-          // 1️⃣ Horizontal scrollable tabs
-          ListView.builder(
-            scrollDirection: Axis.horizontal,
-            itemCount: Category.defaultCategories.length + 1, // +1 for "All"
-            itemBuilder: (context, index) {
-              if (index == 0) {
-                // "All" tab
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: _buildCategoryTab(
-                    title: 'All',
-                    isSelected: _selectedCategory == 'all',
-                    onTap: () {
-                      setState(() {
-                        _selectedCategory = 'all';
-                      });
-                    },
-                  ),
-                );
-              } else {
-                final category = Category.defaultCategories[index - 1];
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: _buildCategoryTab(
-                    title: category.name,
-                    isSelected: _selectedCategory == category.id,
-                    onTap: () {
-                      setState(() {
-                        _selectedCategory = category.id;
-                      });
-                    },
-                  ),
-                );
-              }
-            },
-          ),
-
-          // 2️⃣ Right scroll indicator
-          Positioned(
-            right: 0,
-            top: 0,
-            bottom: 0,
-            child: Container(
-              width: 20,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.centerLeft,
-                  end: Alignment.centerRight,
-                  colors: [
-                    Colors.transparent,
-                    Colors.grey.shade300.withOpacity(0.6),
-                  ],
-                ),
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(8),
-                  bottomLeft: Radius.circular(8),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
   }
 
   Widget _buildCategoryTab({
@@ -2333,186 +1901,36 @@ class HomeScreenState extends State<HomeScreen> {
             itemCount: bills.length,
             separatorBuilder: (_, __) =>
                 Divider(height: 1, color: Colors.grey[200]),
-            itemBuilder: (_, index) => _buildBillItem(bills[index]),
+            itemBuilder: (_, index) => BillItemWidget(
+              bill: {...bills[index], 'index': index},
+              onMarkAsPaid: (billIndex) async {
+                bool? confirm = await _showMarkAsPaidConfirmDialog(
+                  context,
+                  bills[billIndex]['name'] ?? 'this bill',
+                );
+                if (confirm == true) {
+                  await _markBillAsPaid(billIndex);
+                  _loadSubscriptions();
+                }
+              },
+              onDelete: (billIndex) async {
+                bool? confirm = await _showDeleteConfirmDialog(context);
+                if (confirm == true) {
+                  await _deleteSubscription(billIndex);
+                  _loadSubscriptions();
+                }
+              },
+              onEdit: (billData) {
+                _editBill(billData['originalIndex']);
+              },
+              onShowDetails: (billData) {
+                // Show bill details if needed
+              },
+              useHomeScreenEdit: true,
+            ),
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildBillItem(Map<String, dynamic> bill) {
-    final dueDate = _parseDueDate(bill);
-    final now = DateTime.now();
-    final isOverdue =
-        dueDate != null && dueDate.isBefore(now) && bill['status'] != 'paid';
-    final isPaid = bill['status'] == 'paid';
-    final billIndex = _bills.indexOf(bill);
-
-    return Dismissible(
-      key: Key(bill['id'] ?? billIndex.toString()),
-      direction: DismissDirection.endToStart,
-      background: Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        decoration: BoxDecoration(
-          color: HSLColor.fromAHSL(1.0, 0, 0.8, 0.8).toColor(),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: const Icon(Icons.delete, color: Colors.white),
-      ),
-      onDismissed: (_) => _deleteBill(billIndex),
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 6),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: HSLColor.fromAHSL(1.0, 236, 0.89, 0.85).toColor(),
-              blurRadius: 6,
-              spreadRadius: 1,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Bill header
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: isPaid
-                          ? HSLColor.fromAHSL(1.0, 236, 0.89, 0.7).toColor()
-                          : (isOverdue
-                                ? HSLColor.fromAHSL(1.0, 0, 0.8, 0.85).toColor()
-                                : HSLColor.fromAHSL(
-                                    1.0,
-                                    36,
-                                    0.9,
-                                    0.85,
-                                  ).toColor()),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(
-                      isPaid
-                          ? Icons.check_circle
-                          : (isOverdue ? Icons.error : Icons.access_time),
-                      color: isPaid
-                          ? HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor()
-                          : Colors.orange,
-                      size: 20,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          bill['name'] ?? 'Unknown Bill',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                            color: Colors.black87,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.calendar_today,
-                              size: 14,
-                              color: Colors.grey[600],
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              dueDate != null
-                                  ? _formatDate(dueDate)
-                                  : 'No due date',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  Text(
-                    '\$${_parseAmount(bill['amount']).toStringAsFixed(2)}',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                      color: isPaid
-                          ? HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor()
-                          : Colors.black87,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              // Compact actions
-              Row(
-                children: [
-                  if (!isPaid)
-                    SizedBox(
-                      height: 30,
-                      child: OutlinedButton.icon(
-                        onPressed: () => _markAsPaid(billIndex),
-                        icon: const Icon(Icons.check, size: 16),
-                        label: const Text(
-                          'Paid',
-                          style: TextStyle(fontSize: 12),
-                        ),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.green,
-                          side: const BorderSide(color: Colors.green),
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          minimumSize: const Size(0, 0),
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
-                      ),
-                    ),
-                  if (!isPaid) const SizedBox(width: 8),
-                  SizedBox(
-                    height: 30,
-                    child: OutlinedButton.icon(
-                      onPressed: () => _showQuickEditSheet(context, bill),
-                      icon: const Icon(Icons.edit, size: 16),
-                      label: const Text('Edit', style: TextStyle(fontSize: 12)),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: HSLColor.fromAHSL(
-                          1.0,
-                          236,
-                          0.89,
-                          0.65,
-                        ).toColor(),
-                        side: BorderSide(
-                          color: HSLColor.fromAHSL(
-                            1.0,
-                            236,
-                            0.89,
-                            0.65,
-                          ).toColor(),
-                        ),
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        minimumSize: const Size(0, 0),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 
@@ -2737,197 +2155,6 @@ class HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
-  }
-
-  // Show bill details modal
-  void _showBillDetails(BuildContext context, Map<String, dynamic> bill) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (context) => Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Bill Details',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-                ),
-                IconButton(
-                  onPressed: () => Navigator.pop(context),
-                  icon: const Icon(Icons.close),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Text(
-              bill['name'] ?? 'Unknown Bill',
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Amount: \$${_parseAmount(bill['amount']).toStringAsFixed(2)}',
-              style: const TextStyle(fontSize: 16, color: Colors.black87),
-            ),
-            if (bill['dueDate'] != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Due Date: ${bill['dueDate']}',
-                style: const TextStyle(fontSize: 16, color: Colors.black87),
-              ),
-            ],
-            if (bill['category'] != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Category: ${bill['category']}',
-                style: const TextStyle(fontSize: 16, color: Colors.black87),
-              ),
-            ],
-            const SizedBox(height: 20),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () {
-                      Navigator.pop(context);
-                      // TODO: Implement edit functionality
-                    },
-                    child: const Text('Edit'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: () {
-                      Navigator.pop(context);
-                      // TODO: Implement delete functionality
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red,
-                      foregroundColor: Colors.white,
-                    ),
-                    child: const Text('Delete'),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildViewAllCard(BuildContext context) {
-    return InkWell(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => AllBillsScreen()), // your screen
-        );
-      },
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.blueGrey[50],
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: Colors.blueGrey.withOpacity(0.3),
-            width: 1.5,
-          ),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: const [
-            Icon(Icons.list_alt, size: 28, color: Colors.blueGrey),
-            SizedBox(height: 8),
-            Text(
-              "View All",
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: Colors.black87,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // Helper function to get category descriptions
-  String _getCategoryDescription(String categoryName) {
-    switch (categoryName.toLowerCase()) {
-      case 'subscription':
-        return 'Streaming services, software licenses';
-      case 'rent':
-        return 'Housing, office, storage payments';
-      case 'internet':
-        return 'WiFi, broadband, mobile data';
-      case 'education':
-        return 'School fees, courses, learning';
-      case 'utilities':
-        return 'Water, electricity, gas, trash';
-      case 'insurance':
-        return 'Health, car, home, life insurance';
-      case 'transport':
-        return 'Car payments, fuel, public transport';
-      case 'entertainment':
-        return 'Movies, concerts, hobbies';
-      case 'food & dining':
-        return 'Groceries, restaurants, food delivery';
-      case 'shopping':
-        return 'Clothing, electronics, home goods';
-      case 'health':
-        return 'Medical bills, gym, wellness';
-      case 'fitness':
-        return 'Gym memberships, personal training';
-      default:
-        return 'Miscellaneous expenses';
-    }
-  }
-
-  // Helper function to get bill name hints based on category
-  String _getBillNameHint(String categoryName) {
-    switch (categoryName.toLowerCase()) {
-      case 'subscription':
-        return 'Netflix, Spotify, etc.';
-      case 'rent':
-        return 'Monthly rent payment';
-      case 'internet':
-        return 'WiFi bill, broadband';
-      case 'education':
-        return 'Tuition fee, course payment';
-      case 'utilities':
-        return 'Electricity bill, water bill';
-      case 'insurance':
-        return 'Health insurance, car insurance';
-      case 'transport':
-        return 'Car payment, fuel expense';
-      case 'entertainment':
-        return 'Movie tickets, concert';
-      case 'food & dining':
-        return 'Grocery shopping, restaurant';
-      case 'shopping':
-        return 'Clothing, electronics';
-      case 'health':
-        return 'Doctor visit, medication';
-      case 'fitness':
-        return 'Gym membership, yoga class';
-      default:
-        return 'Enter bill name';
-    }
   }
 
   void _showFrequencyBottomSheet(
@@ -3171,19 +2398,71 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void showAddBillBottomSheet(BuildContext context) {
+  void showAddBillBottomSheet(BuildContext context, {Map<String, dynamic>? bill, int? editIndex}) {
     final _formKey = GlobalKey<FormState>();
-    final _nameController = TextEditingController();
-    final _amountController = TextEditingController();
-    final _dueDateController = TextEditingController();
-    final _dueTimeController = TextEditingController();
-    final _notesController = TextEditingController();
+    final _nameController = TextEditingController(text: bill?['name'] ?? '');
+    final _amountController = TextEditingController(text: bill?['amount']?.toString() ?? '');
+    final _dueDateController = TextEditingController(text: bill?['dueDate'] ?? '');
+    final _dueTimeController = TextEditingController(text: bill?['dueTime'] ?? '');
+    final _notesController = TextEditingController(text: bill?['notes'] ?? '');
     final _reminderTimeController = TextEditingController();
     DateTime? _selectedDate;
-    TimeOfDay? _selectedTime;
-    String _selectedFrequency = 'Monthly';
-    String _selectedReminder = 'Same day';
+    TimeOfDay? _selectedTime;  // This is the DUE time (when bill expires)
+    TimeOfDay? _selectedReminderTime;  // This is the REMINDER time (when notification is sent)
+    String _selectedFrequency = bill?['frequency'] ?? 'Monthly';
+    String _selectedReminder = bill?['reminder'] ?? 'Same day';
     Category _selectedCategory = Category.defaultCategories[0];
+
+    final bool isEditMode = bill != null && editIndex != null;
+
+    // Parse the due date and time if they exist (for edit mode)
+    if (isEditMode) {
+      final parsedDate = _parseDueDate(bill!);
+      if (parsedDate != null) {
+        _selectedDate = parsedDate;
+        _selectedTime = TimeOfDay(hour: parsedDate.hour, minute: parsedDate.minute);
+
+        // Format date and time for display
+        _dueDateController.text = '${parsedDate.day.toString().padLeft(2, '0')}/${parsedDate.month.toString().padLeft(2, '0')}/${parsedDate.year}';
+        _dueTimeController.text = _selectedTime.format(context);
+      }
+
+      // Parse the reminder time if it exists (SEPARATE from due time)
+      if (bill!['reminderTime'] != null) {
+        try {
+          final reminderTimeStr = bill['reminderTime'];
+          if (reminderTimeStr is String) {
+            final parts = reminderTimeStr.split(':');
+            if (parts.length == 2) {
+              _selectedReminderTime = TimeOfDay(
+                hour: int.parse(parts[0]),
+                minute: int.parse(parts[1]),
+              );
+            }
+          } else if (reminderTimeStr is Map) {
+            _selectedReminderTime = TimeOfDay(
+              hour: reminderTimeStr['hour'] ?? 9,
+              minute: reminderTimeStr['minute'] ?? 0,
+            );
+          }
+        } catch (e) {
+          // If parsing fails, fall back to default
+          _selectedReminderTime = await _getDefaultNotificationTime();
+        }
+      } else {
+        // If no specific reminder time, get default from settings
+        _selectedReminderTime = await _getDefaultNotificationTime();
+      }
+    }
+
+    // Set category if exists
+    if (bill?['category'] != null) {
+        final category = Category.findById(bill['category']);
+        if (category != null) {
+          _selectedCategory = category;
+        }
+      }
+    }
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -3203,6 +2482,9 @@ class HomeScreenState extends State<HomeScreen> {
           ),
           child: StatefulBuilder(
             builder: (BuildContext context, StateSetter setState) {
+              // Make these variables accessible inside the builder
+              final bool isEditMode = bill != null && editIndex != null;
+              final int? currentEditIndex = editIndex;
               return Form(
                 key: _formKey,
                 child: SingleChildScrollView(
@@ -3215,22 +2497,22 @@ class HomeScreenState extends State<HomeScreen> {
                             width: 32,
                             height: 32,
                             decoration: BoxDecoration(
-                              color: kPrimaryColor.withOpacity(0.1),
+                              color: (isEditMode ? Colors.orange[700]! : kPrimaryColor).withOpacity(0.1),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Icon(
-                              Icons.add,
-                              color: kPrimaryColor,
+                              isEditMode ? Icons.edit : Icons.add,
+                              color: isEditMode ? Colors.orange[700]! : kPrimaryColor,
                               size: 18,
                             ),
                           ),
                           const SizedBox(width: 10),
                           Text(
-                            'Add bill',
+                            isEditMode ? 'Edit Bill' : 'Add Bill',
                             style: Theme.of(context).textTheme.titleMedium
                                 ?.copyWith(
                                   fontWeight: FontWeight.w600,
-                                  color: kPrimaryColor,
+                                  color: isEditMode ? Colors.orange[700]! : kPrimaryColor,
                                   fontSize: 16,
                                 ),
                           ),
@@ -3832,17 +3114,16 @@ class HomeScreenState extends State<HomeScreen> {
                                     await _getDefaultNotificationTime();
                                 final TimeOfDay? picked = await showTimePicker(
                                   context: context,
-                                  initialTime: _selectedTime ?? defaultTime,
+                                  initialTime: _selectedReminderTime ?? defaultTime,
                                 );
                                 if (picked != null) {
                                   setState(() {
-                                    _selectedTime = picked;
+                                    _selectedReminderTime = picked;
                                     _reminderTimeController.text =
-                                        _selectedTime!.format(context);
+                                        _selectedReminderTime!.format(context);
 
-                                    // Update user's default notification preference
-                                    NotificationService()
-                                        .setDefaultNotificationTime(picked);
+                                    // Don't update user's default notification preference
+                                    // when editing individual bill reminder time
                                   });
                                 }
                               },
@@ -3899,13 +3180,13 @@ class HomeScreenState extends State<HomeScreen> {
                                       Text(
                                         _selectedReminder == 'No reminder'
                                             ? 'No reminder set'
-                                            : (_selectedTime?.format(context) ??
+                                            : (_selectedReminderTime?.format(context) ??
                                                   'Select reminder time'),
                                         style: TextStyle(
                                           color:
                                               _selectedReminder == 'No reminder'
                                               ? Colors.grey[400]
-                                              : (_selectedTime != null
+                                              : (_selectedReminderTime != null
                                                     ? Colors.black
                                                     : Colors.grey[400]),
                                           fontSize: 14,
@@ -4043,15 +3324,22 @@ class HomeScreenState extends State<HomeScreen> {
                                   }
 
                                   // Schedule notification if reminder time is selected
-                                  if (_selectedTime != null) {
+                                  if (_selectedReminderTime != null && _selectedReminder != 'No reminder') {
+                                    // Calculate the actual reminder date based on the reminder preference
+                                    DateTime reminderDate;
+                                    if (_selectedDate != null) {
+                                      reminderDate = _calculateReminderDate(_selectedDate!, _selectedReminder);
+                                    } else {
+                                      reminderDate = DateTime.now();
+                                    }
+
+                                    // Set the reminder time (separate from due time)
                                     final reminderDateTime = DateTime(
-                                      _selectedDate?.year ??
-                                          DateTime.now().year,
-                                      _selectedDate?.month ??
-                                          DateTime.now().month,
-                                      _selectedDate?.day ?? DateTime.now().day,
-                                      _selectedTime!.hour,
-                                      _selectedTime!.minute,
+                                      reminderDate.year,
+                                      reminderDate.month,
+                                      reminderDate.day,
+                                      _selectedReminderTime!.hour,
+                                      _selectedReminderTime!.minute,
                                     );
 
                                     // Only schedule if the reminder time is in the future
@@ -4080,8 +3368,8 @@ class HomeScreenState extends State<HomeScreen> {
                                     'dueDateTime': _selectedDate
                                         ?.toIso8601String(),
                                     'reminderTime':
-                                        _reminderTimeController.text.isNotEmpty
-                                        ? _reminderTimeController.text
+                                        _selectedReminderTime != null
+                                        ? '${_selectedReminderTime!.hour.toString().padLeft(2, '0')}:${_selectedReminderTime!.minute.toString().padLeft(2, '0')}'
                                         : null,
                                     'frequency': _selectedFrequency,
                                     'reminder': _selectedReminder,
@@ -4096,7 +3384,11 @@ class HomeScreenState extends State<HomeScreen> {
                                         ? null
                                         : _notesController.text,
                                   };
-                                  await _addSubscription(subscription);
+                                  if (isEditMode && currentEditIndex != null) {
+                                    await _updateBill(currentEditIndex, subscription);
+                                  } else {
+                                    await _addSubscription(subscription);
+                                  }
                                   if (mounted) {
                                     Navigator.pop(context);
                                   }
@@ -4112,8 +3404,8 @@ class HomeScreenState extends State<HomeScreen> {
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                               ),
-                              child: const Text(
-                                'Add Subscription',
+                              child: Text(
+                                isEditMode ? 'Edit Bill' : 'Add Bill',
                                 style: TextStyle(fontSize: 14),
                               ),
                             ),
@@ -4666,49 +3958,14 @@ class HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _syncWithFirebase() async {
-    if (!mounted) return;
-
-    await _checkConnectivity();
-
-    if (_isOnline) {
-      try {
-        final success = await _subscriptionService.syncLocalToFirebase();
-        await _loadSubscriptions();
-
-        if (mounted) {
-          setState(() {});
-
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                success ? 'Synced successfully!' : 'Some items failed to sync',
-              ),
-              backgroundColor: success ? Colors.green : Colors.orange,
-            ),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Sync failed: ${e.toString()}'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
-    } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'No internet connection. Please try again when online.',
-            ),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      }
+  /// Get the user's default notification time preference
+  Future<TimeOfDay> _getDefaultNotificationTime() async {
+    try {
+      final notificationService = NotificationService();
+      return await notificationService.getDefaultNotificationTime();
+    } catch (e) {
+      // Fallback to 9:00 AM if there's an error
+      return const TimeOfDay(hour: 9, minute: 0);
     }
   }
 }
