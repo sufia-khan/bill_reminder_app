@@ -20,7 +20,7 @@ class Category {
     Category(
       id: 'subscription',
       name: 'Subscription',
-      icon: Icons.subscriptions,
+      icon: Icons.credit_card,
       color: const Color(0xFF5E35B1),
       backgroundColor: const Color(0xFFE8EAF6),
     ),

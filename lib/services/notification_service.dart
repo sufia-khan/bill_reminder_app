@@ -525,4 +525,94 @@ class NotificationService {
     // For now, we'll just show a message directing users to settings
     debugPrint('Please enable notifications in device settings');
   }
+
+  // Simple method for scheduling notifications at a specific time
+  Future<void> scheduleNotification({
+    required int id,
+    required String title,
+    required String body,
+    required DateTime scheduledTime,
+    String? payload,
+  }) async {
+    try {
+      // Check if notifications are globally enabled
+      final prefs = await SharedPreferences.getInstance();
+      final notificationsEnabled = prefs.getBool('notifications_enabled') ?? true;
+
+      if (!notificationsEnabled) {
+        debugPrint('🚫 Notifications are disabled globally, skipping notification scheduling');
+        return;
+      }
+
+      final now = DateTime.now();
+
+      // Make sure notification time is in the future
+      if (scheduledTime.isBefore(now)) {
+        debugPrint('⚠️ Notification time is in the past, skipping: $scheduledTime (now: $now)');
+        return;
+      }
+
+      // Convert to local timezone with proper UTC handling
+      final tz.TZDateTime localScheduledTime = tz.TZDateTime.local(
+        scheduledTime.year,
+        scheduledTime.month,
+        scheduledTime.day,
+        scheduledTime.hour,
+        scheduledTime.minute,
+      );
+
+      debugPrint('📅 Scheduling notification:');
+      debugPrint('   Title: $title');
+      debugPrint('   Scheduled Time: $localScheduledTime');
+      debugPrint('   Current Time: $now');
+
+      // Android notification details
+      const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+        'bill_reminders',
+        'Bill Reminders',
+        channelDescription: 'Notifications for bill due dates',
+        importance: Importance.high,
+        priority: Priority.high,
+        icon: '@mipmap/ic_launcher',
+        largeIcon: DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
+        actions: [
+          AndroidNotificationAction(
+            'mark_paid',
+            'Mark as Paid',
+            icon: DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
+          ),
+        ],
+      );
+
+      // iOS notification details
+      const DarwinNotificationDetails iOSDetails = DarwinNotificationDetails(
+        presentAlert: true,
+        presentBadge: true,
+        presentSound: true,
+      );
+
+      // Combined notification details
+      const NotificationDetails notificationDetails = NotificationDetails(
+        android: androidDetails,
+        iOS: iOSDetails,
+      );
+
+      // Schedule the notification
+      await flutterLocalNotificationsPlugin.zonedSchedule(
+        id,
+        title,
+        body,
+        localScheduledTime,
+        notificationDetails,
+        uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        payload: payload ?? 'bill_reminder_$id',
+      );
+
+      debugPrint('✅ Successfully scheduled notification for $title at $localScheduledTime');
+    } catch (e) {
+      debugPrint('❌ ERROR scheduling notification: $e');
+      debugPrint('Stack trace: ${StackTrace.current}');
+    }
+  }
 }

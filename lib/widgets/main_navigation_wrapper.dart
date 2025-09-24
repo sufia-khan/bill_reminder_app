@@ -77,16 +77,12 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
             GestureDetector(
               onTap: () {
                 if (_currentIndex == 0) {
-                  _homeScreenKey.currentState?.showAddBillBottomSheet(
-                    context,
-                    _homeScreenKey.currentState!.addSubscription,
-                  );
+                  _homeScreenKey.currentState?.showAddBillBottomSheet(context);
                 } else {
                   setState(() => _currentIndex = 0);
                   WidgetsBinding.instance.addPostFrameCallback((_) {
                     _homeScreenKey.currentState?.showAddBillBottomSheet(
                       context,
-                      _homeScreenKey.currentState!.addSubscription,
                     );
                   });
                 }
