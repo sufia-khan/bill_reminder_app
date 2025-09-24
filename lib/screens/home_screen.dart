@@ -1,11 +1,15 @@
 import 'dart:async';
+import 'package:auto_size_text/auto_size_text.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:projeckt_k/screens/all_bills_screen.dart';
 import 'package:projeckt_k/screens/profile_screen.dart';
 import 'package:projeckt_k/services/auth_service.dart';
 import 'package:projeckt_k/services/subscription_service.dart';
+import 'package:projeckt_k/services/notification_service.dart';
 import 'package:projeckt_k/models/category_model.dart';
 import 'package:projeckt_k/widgets/subtitle_changing.dart';
+import 'package:projeckt_k/widgets/bill_summary_cards.dart';
 
 final Color kPrimaryColor = HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor();
 final Color bgUpcomingMuted = HSLColor.fromAHSL(
@@ -32,6 +36,13 @@ class HomeScreenState extends State<HomeScreen> {
   StreamSubscription<bool>? _connectivitySubscription;
   Timer? _updateTimer;
   String _selectedCategory = 'all'; // 'all' or specific category id
+  // set the fixed box heights once
+  double topBox = 40;
+  double midBox = 100;
+  double bottomBox = 40;
+  double bottomSingleLineSize = 18;
+  double primarySize = 44;
+
   @override
   void initState() {
     super.initState();
@@ -45,6 +56,15 @@ class HomeScreenState extends State<HomeScreen> {
 
   Future<void> _initServices() async {
     await _subscriptionService.init();
+
+    // Set up notification callback for mark as paid action
+    final notificationService = NotificationService();
+    notificationService.onMarkAsPaid = (String? billId) {
+      debugPrint('📝 Mark as paid callback received for bill ID: $billId');
+      if (billId != null) {
+        _markBillAsPaidFromNotification(billId);
+      }
+    };
   }
 
   @override
@@ -94,6 +114,7 @@ class HomeScreenState extends State<HomeScreen> {
   void _checkForOverdueBills() {
     bool needsUpdate = false;
     final now = DateTime.now();
+    final notificationService = NotificationService();
 
     for (var bill in _bills) {
       try {
@@ -105,6 +126,9 @@ class HomeScreenState extends State<HomeScreen> {
           // Mark bill as overdue
           bill['status'] = 'overdue';
           needsUpdate = true;
+
+          // Send immediate overdue notification
+          _sendOverdueBillNotification(bill, notificationService);
         }
       } catch (e) {
         debugPrint('Error checking overdue bill: $e');
@@ -113,6 +137,62 @@ class HomeScreenState extends State<HomeScreen> {
 
     if (needsUpdate && mounted) {
       setState(() {});
+    }
+  }
+
+  Future<void> _sendOverdueBillNotification(
+    Map<String, dynamic> bill,
+    NotificationService notificationService,
+  ) async {
+    try {
+      final billName = bill['name'] ?? 'Unknown Bill';
+      final billAmount = bill['amount'] ?? '0';
+      final id = bill['id'] ?? DateTime.now().millisecondsSinceEpoch;
+
+      debugPrint('🚨 Sending overdue notification for bill: $billName');
+
+      await notificationService.showImmediateNotification(
+        title: '🚨 OVERDUE: $billName',
+        body:
+            'Your bill for $billAmount is overdue. Please pay as soon as possible.',
+        payload: id.toString(),
+      );
+    } catch (e) {
+      debugPrint('Error sending overdue notification: $e');
+    }
+  }
+
+  // Mark bill as paid from notification action
+  void _markBillAsPaidFromNotification(String billId) {
+    debugPrint('📝 Marking bill as paid from notification: $billId');
+
+    try {
+      // Find the bill by ID
+      final billIndex = _bills.indexWhere(
+        (bill) =>
+            bill['id']?.toString() == billId ||
+            bill['firebaseId']?.toString() == billId ||
+            bill['localId']?.toString() == billId,
+      );
+
+      if (billIndex != -1) {
+        final bill = _bills[billIndex];
+        _markAsPaid(billIndex);
+
+        // Cancel the notification for this bill
+        final notificationService = NotificationService();
+        final notificationId =
+            bill['notificationId'] ??
+            int.tryParse(billId) ??
+            DateTime.now().millisecondsSinceEpoch;
+        notificationService.cancelNotification(notificationId);
+
+        debugPrint('✅ Bill marked as paid and notification cancelled');
+      } else {
+        debugPrint('❌ Bill not found with ID: $billId');
+      }
+    } catch (e) {
+      debugPrint('Error marking bill as paid from notification: $e');
     }
   }
 
@@ -1674,26 +1754,9 @@ class HomeScreenState extends State<HomeScreen> {
               bottomRight: Radius.circular(30),
             ),
             child: Container(
-              // The unified gradient container (app bar + stats)
+              // White container for app bar
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    HSLColor.fromAHSL(
-                      1.0,
-                      236,
-                      0.89,
-                      0.65,
-                    ).toColor(), // medium vibrant blue
-                    HSLColor.fromAHSL(
-                      1.0,
-                      236,
-                      0.89,
-                      0.75,
-                    ).toColor(), // lighter blue
-                  ],
-                ),
+                color: Colors.white,
                 borderRadius: const BorderRadius.only(
                   bottomLeft: Radius.circular(30),
                   bottomRight: Radius.circular(30),
@@ -1717,17 +1780,10 @@ class HomeScreenState extends State<HomeScreen> {
                         children: [
                           Row(
                             children: [
-                              Container(
-                                padding: const EdgeInsets.all(6),
-                                decoration: BoxDecoration(
-                                  color: Colors.orange.withOpacity(0.5),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: const Icon(
-                                  Icons.notifications_active_rounded,
-                                  color: Colors.white,
-                                  size: 25,
-                                ),
+                              const Icon(
+                                Icons.notifications_active_rounded,
+                                color: Colors.orange,
+                                size: 25,
                               ),
                               const SizedBox(width: 12),
                               Column(
@@ -1736,7 +1792,7 @@ class HomeScreenState extends State<HomeScreen> {
                                   Text(
                                     'SubManager',
                                     style: TextStyle(
-                                      color: Colors.white,
+                                      color: Colors.black87,
                                       fontWeight: FontWeight.bold,
                                       fontSize: 23,
                                     ),
@@ -1792,224 +1848,77 @@ class HomeScreenState extends State<HomeScreen> {
                       // Stats row (inside same gradient container)
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 2),
-                        child: Row(
+                        child: // Inside your Padding -> Row
+                        Row(
                           children: [
-                            // This Month card
-                            // This Month card
                             Expanded(
-                              child: Container(
-                                height: 175,
-                                padding: const EdgeInsets.all(15.0),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(20),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withOpacity(0.08),
-                                      blurRadius: 10,
-                                      offset: const Offset(0, 6),
-                                    ),
-                                  ],
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Container(
-                                          padding: const EdgeInsets.all(8),
-                                          decoration: BoxDecoration(
-                                            color: HSLColor.fromAHSL(
-                                              1.0,
-                                              236,
-                                              0.89,
-                                              0.65,
-                                            ).toColor().withOpacity(0.1),
-                                            borderRadius: BorderRadius.circular(
-                                              12,
-                                            ),
-                                          ),
-                                          child: Icon(
-                                            Icons.trending_up_rounded,
-                                            color: HSLColor.fromAHSL(
-                                              1.0,
-                                              236,
-                                              0.89,
-                                              0.65,
-                                            ).toColor(),
-                                            size: 20,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        const Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              'This',
-                                              style: TextStyle(
-                                                color: Colors.black87,
-                                                fontSize: 16,
-                                                fontWeight: FontWeight.w500,
-                                              ),
-                                            ),
-                                            SizedBox(height: 2),
-                                            Text(
-                                              'Month',
-                                              style: TextStyle(
-                                                color: Colors.black87,
-                                                fontSize: 16,
-                                                fontWeight: FontWeight.w500,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 16),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        mainAxisAlignment: MainAxisAlignment
-                                            .spaceEvenly, // equal spacing
-                                        children: [
-                                          Text(
-                                            '\$${_calculateMonthlyTotal().toStringAsFixed(2)}',
-                                            style: const TextStyle(
-                                              fontSize: 22,
-                                              fontWeight: FontWeight.bold,
-                                              color: Colors.black,
-                                            ),
-                                          ),
-                                          Text.rich(
-                                            TextSpan(
-                                              children: [
-                                                TextSpan(
-                                                  text:
-                                                      '\$${_calculateMonthlyDifference().abs().toStringAsFixed(2)} ',
-                                                  style: const TextStyle(
-                                                    fontSize: 16,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: Colors.black87,
-                                                  ),
-                                                ),
-                                                TextSpan(
-                                                  text:
-                                                      _calculateMonthlyDifference() >
-                                                          0
-                                                      ? 'more than last month'
-                                                      : 'less than last month',
-                                                  style: const TextStyle(
-                                                    fontSize: 16,
-                                                    fontWeight:
-                                                        FontWeight.normal,
-                                                    color: Colors.black87,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                              child: BillSummaryCard(
+                                title: "This Month",
+                                icon: Icons.trending_up_rounded,
+                                gradientColors: [
+                                  HSLColor.fromAHSL(
+                                    1.0,
+                                    250,
+                                    0.84,
+                                    0.60,
+                                  ).toColor(),
+                                  HSLColor.fromAHSL(
+                                    1.0,
+                                    280,
+                                    0.75,
+                                    0.65,
+                                  ).toColor(),
+                                ],
+                                primaryValue:
+                                    "\$${_calculateMonthlyTotal().toStringAsFixed(2)}",
+                                secondaryAmount:
+                                    "\$${_calculateMonthlyDifference().abs().toStringAsFixed(2)}",
+                                secondaryText: _calculateMonthlyDifference() > 0
+                                    ? "more than last month"
+                                    : "less than last month",
+                                topBoxHeight: topBox,
+                                bottomBoxHeight: bottomBox,
+                                bottomSingleLineFontSize: bottomSingleLineSize,
+                                primaryFontSize: primarySize,
+                                iconOnRight: true,
+                                iconSize: 44,
+                                textIconGap: 8,
+                                padding: 10,
                               ),
                             ),
-                            SizedBox(width: 15),
-                            // Next 7 Days card
+
+                            const SizedBox(width: 12),
+
                             Expanded(
-                              child: Container(
-                                height: 175,
-                                padding: const EdgeInsets.all(15.0),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(20),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withOpacity(0.08),
-                                      blurRadius: 10,
-                                      offset: const Offset(0, 6),
-                                    ),
-                                  ],
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Container(
-                                          padding: const EdgeInsets.all(8),
-                                          decoration: BoxDecoration(
-                                            color: Colors.orange.withOpacity(
-                                              0.1,
-                                            ),
-                                            borderRadius: BorderRadius.circular(
-                                              12,
-                                            ),
-                                          ),
-                                          child: const Icon(
-                                            Icons.upcoming,
-                                            color: Colors.orange,
-                                            size: 20,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        RichText(
-                                          text: const TextSpan(
-                                            children: [
-                                              TextSpan(
-                                                text: 'Next 7\n',
-                                                style: TextStyle(
-                                                  color: Colors.black87,
-                                                  fontSize: 16,
-                                                  fontWeight: FontWeight.w500,
-                                                ),
-                                              ),
-                                              TextSpan(
-                                                text: 'Days',
-                                                style: TextStyle(
-                                                  color: Colors.black87,
-                                                  fontSize: 16,
-                                                  fontWeight: FontWeight.w500,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 16),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        mainAxisAlignment: MainAxisAlignment
-                                            .spaceEvenly, // equal spacing
-                                        children: [
-                                          // Remove calendar icon, keep only text
-                                          Text(
-                                            '${_getUpcoming7DaysCount()} bills',
-                                            style: const TextStyle(
-                                              fontSize: 22,
-                                              fontWeight: FontWeight.bold,
-                                              color: Colors.black,
-                                            ),
-                                          ),
-                                          Text(
-                                            '\$${_getUpcoming7DaysTotal().toStringAsFixed(2)}',
-                                            style: const TextStyle(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.bold,
-                                              color: Colors.black87,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                              child: BillSummaryCard(
+                                title: "Next 7 Days",
+                                icon: Icons.calendar_today_rounded,
+                                gradientColors: [
+                                  HSLColor.fromAHSL(
+                                    1.0,
+                                    30,
+                                    0.85,
+                                    0.60,
+                                  ).toColor(),
+                                  HSLColor.fromAHSL(
+                                    1.0,
+                                    15,
+                                    0.85,
+                                    0.55,
+                                  ).toColor(),
+                                ],
+                                primaryValue:
+                                    "\$${_getUpcoming7DaysTotal().toStringAsFixed(2)}",
+                                secondaryText:
+                                    "${_getUpcoming7DaysCount()} bills",
+                                topBoxHeight: topBox,
+                                bottomBoxHeight: bottomBox,
+                                bottomSingleLineFontSize: bottomSingleLineSize,
+                                primaryFontSize: primarySize,
+                                iconOnRight: true,
+                                iconSize: 44,
+                                textIconGap: 8,
+                                padding: 10,
                               ),
                             ),
                           ],
@@ -2689,7 +2598,9 @@ class HomeScreenState extends State<HomeScreen> {
 
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('$billName deleted. Changes will sync when online.'),
+                      content: Text(
+                        '$billName deleted. Changes will sync when online.',
+                      ),
                       backgroundColor: Colors.orange,
                       duration: const Duration(seconds: 3),
                     ),
@@ -3164,823 +3075,1624 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void showAddBillBottomSheet(BuildContext context) {
+  void showAddBillBottomSheet(
+    BuildContext context,
+    Future<void> Function(Map) _addSubscription,
+  ) {
     final _formKey = GlobalKey<FormState>();
     final _nameController = TextEditingController();
     final _amountController = TextEditingController();
     final _dueDateController = TextEditingController();
     final _dueTimeController = TextEditingController();
     final _notesController = TextEditingController();
+
     DateTime? _selectedDate;
     TimeOfDay? _selectedTime;
     String _selectedFrequency = 'Monthly';
     String _selectedReminder = 'Same day';
+    TimeOfDay _selectedNotificationTime;
     Category _selectedCategory = Category.defaultCategories[0];
+
+    // Initialize notification time from service
+    final notificationService = NotificationService();
+    _selectedNotificationTime = const TimeOfDay(
+      hour: 9,
+      minute: 0,
+    ); // Fallback default
+    notificationService.getDefaultNotificationTime().then((time) {
+      _selectedNotificationTime = time;
+    });
+
+    // Comprehensive mapping of category name -> common bill types and sub-categories
+    final Map<String, List<String>> predefinedBills = {
+      'Subscription': [
+        'Netflix',
+        'Spotify',
+        'YouTube Premium',
+        'Amazon Prime',
+        'Disney+',
+        'Apple Music',
+        'Hulu',
+        'HBO Max',
+        'Other',
+      ],
+      'Rent': [
+        'House Rent',
+        'Apartment Rent',
+        'Office Rent',
+        'Shop Rent',
+        'Warehouse Rent',
+        'Storage Rent',
+        'Parking Rent',
+        'Other',
+      ],
+      'Internet': [
+        'Home Internet',
+        'Mobile Internet',
+        'Office Internet',
+        'WiFi Hotspot',
+        'Broadband',
+        'Fiber Optic',
+        'Other',
+      ],
+      'Education': [
+        'School Fees',
+        'College Tuition',
+        'Online Courses',
+        'Books & Supplies',
+        'Student Loans',
+        'Certification Programs',
+        'Tutoring',
+        'Other',
+      ],
+      'Utilities': [
+        'Water Bill',
+        'Electricity Bill',
+        'Gas Bill',
+        'Trash Collection',
+        'Sewage Bill',
+        'Property Tax',
+        'Maintenance Fees',
+        'Other',
+      ],
+      'Insurance': [
+        'Health Insurance',
+        'Car Insurance',
+        'Home Insurance',
+        'Life Insurance',
+        'Travel Insurance',
+        'Phone Insurance',
+        'Pet Insurance',
+        'Other',
+      ],
+      'Transport': [
+        'Car Payment',
+        'Fuel',
+        'Public Transport',
+        'Ride Sharing',
+        'Parking Fees',
+        'Toll Fees',
+        'Vehicle Maintenance',
+        'Other',
+      ],
+      'Entertainment': [
+        'Movie Tickets',
+        'Concerts',
+        'Theater',
+        'Gaming Subscriptions',
+        'Streaming Services',
+        'Books & Magazines',
+        'Hobbies',
+        'Other',
+      ],
+      'Food & Dining': [
+        'Groceries',
+        'Restaurants',
+        'Food Delivery',
+        'Coffee Shops',
+        'Fast Food',
+        'Meal Kits',
+        'Office Lunch',
+        'Other',
+      ],
+      'Shopping': [
+        'Clothing',
+        'Electronics',
+        'Home Goods',
+        'Beauty Products',
+        'Sports Equipment',
+        'Furniture',
+        'Online Shopping',
+        'Other',
+      ],
+      'Health': [
+        'Doctor Visits',
+        'Medication',
+        'Dental Care',
+        'Eye Care',
+        'Gym Membership',
+        'Therapy',
+        'Medical Tests',
+        'Other',
+      ],
+      'Fitness': [
+        'Gym Membership',
+        'Personal Trainer',
+        'Yoga Classes',
+        'Pilates',
+        'Sports Club',
+        'Fitness App',
+        'Equipment',
+        'Other',
+      ],
+    };
+
+    // Helper to show a simple choice sheet and return the selected value.
+    Future<T?> _showChoiceSheet<T>(
+      BuildContext ctx, {
+      required String title,
+      required List<T> options,
+      required String Function(T) label,
+    }) {
+      return showModalBottomSheet<T>(
+        context: ctx,
+        backgroundColor: Colors.transparent,
+        builder: (c) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+          child: SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 8,
+                  ),
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                ...options.map((opt) {
+                  final idx = options.indexOf(opt);
+                  return ListTile(
+                    title: Text(label(opt)),
+                    onTap: () => Navigator.of(c).pop(opt),
+                  );
+                }),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Show category picker. If category has predefined bills, show bills list next.
+    Future<void> _showCategoryThenBillsPicker(
+      BuildContext ctx,
+      StateSetter setState,
+    ) async {
+      final Category? pickedCategory = await showModalBottomSheet<Category>(
+        context: ctx,
+        backgroundColor: Colors.transparent,
+        builder: (c) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+          child: SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 6.0),
+                  child: Text(
+                    'Choose Category',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Flexible(
+                  child: GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 3,
+                          childAspectRatio: 1.1,
+                          crossAxisSpacing: 8,
+                          mainAxisSpacing: 8,
+                        ),
+                    itemCount:
+                        Category.defaultCategories.length + 1, // +1 for Other
+                    itemBuilder: (context, index) {
+                      if (index == Category.defaultCategories.length) {
+                        return GestureDetector(
+                          onTap: () {
+                            Navigator.of(c).pop(null);
+                          },
+                          child: Container(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.grey.shade200),
+                            ),
+                            child: Center(child: Text('Other')),
+                          ),
+                        );
+                      }
+                      final cat = Category.defaultCategories[index];
+                      return GestureDetector(
+                        onTap: () {
+                          Navigator.of(c).pop(cat);
+                        },
+                        child: Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            color: Colors.grey.shade50,
+                          ),
+                          padding: const EdgeInsets.all(8),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Container(
+                                width: 36,
+                                height: 36,
+                                decoration: BoxDecoration(
+                                  color: cat.backgroundColor,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Icon(
+                                  cat.icon,
+                                  color: cat.color,
+                                  size: 18,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                cat.name,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      // If user chose Other (pickedCategory == null), show custom category input
+      if (pickedCategory == null) {
+        final Map<String, dynamic>? customBillData =
+            await showModalBottomSheet<Map<String, dynamic>>(
+              context: ctx,
+              backgroundColor: Colors.transparent,
+              isScrollControlled: true,
+              builder: (c) {
+                final _nameController = TextEditingController();
+                final _customCategoryController = TextEditingController();
+                return Padding(
+                  padding: EdgeInsets.only(
+                    bottom: MediaQuery.of(c).viewInsets.bottom,
+                  ),
+                  child: Container(
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.vertical(
+                        top: Radius.circular(18),
+                      ),
+                    ),
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Center(
+                          child: Container(
+                            width: 40,
+                            height: 4,
+                            margin: const EdgeInsets.only(bottom: 12),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade300,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                        ),
+                        const Text(
+                          'Add Custom Bill',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        TextFormField(
+                          controller: _nameController,
+                          decoration: const InputDecoration(
+                            labelText: 'Bill Name',
+                            hintText: 'e.g., My Custom Bill',
+                            border: OutlineInputBorder(),
+                          ),
+                          validator: (value) {
+                            if (value == null || value.isEmpty) {
+                              return 'Please enter bill name';
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          controller: _customCategoryController,
+                          decoration: const InputDecoration(
+                            labelText: 'Category Name',
+                            hintText: 'e.g., Other',
+                            border: OutlineInputBorder(),
+                          ),
+                          validator: (value) {
+                            if (value == null || value.isEmpty) {
+                              return 'Please enter category name';
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: () => Navigator.of(c).pop(null),
+                                child: const Text('Cancel'),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: ElevatedButton(
+                                onPressed: () {
+                                  if (_nameController.text.trim().isNotEmpty &&
+                                      _customCategoryController.text
+                                          .trim()
+                                          .isNotEmpty) {
+                                    Navigator.of(c).pop({
+                                      'name': _nameController.text.trim(),
+                                      'category': _customCategoryController.text
+                                          .trim(),
+                                    });
+                                  }
+                                },
+                                child: const Text('Next'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            );
+
+        if (customBillData != null) {
+          setState(() {
+            _nameController.text = customBillData['name'];
+            _selectedCategory = Category.defaultCategories.firstWhere(
+              (cat) => cat.id == 'other',
+              orElse: () => Category.defaultCategories[0],
+            );
+          });
+        }
+
+        return;
+      }
+
+      // If a category was picked, check for predefined bills for that category
+      final bills = predefinedBills[pickedCategory.name];
+
+      if (bills != null && bills.isNotEmpty) {
+        final String? pickedBill = await showModalBottomSheet<String>(
+          context: ctx,
+          backgroundColor: Colors.transparent,
+          builder: (c) => Container(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+            ),
+            padding: const EdgeInsets.all(12),
+            child: SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6.0),
+                    child: Text(
+                      'Select ${pickedCategory.name} Type',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  ...bills
+                      .map(
+                        (b) => ListTile(
+                          title: Text(b),
+                          onTap: () => Navigator.of(c).pop(b),
+                        ),
+                      )
+                      .toList(),
+                ],
+              ),
+            ),
+          ),
+        );
+
+        if (pickedBill != null) {
+          if (pickedBill == 'Other') {
+            // Quick-add for custom bill name under the chosen category
+            final String? manualName = await showModalBottomSheet<String>(
+              context: ctx,
+              backgroundColor: Colors.transparent,
+              isScrollControlled: true,
+              builder: (c) {
+                final _quickController = TextEditingController();
+                return Padding(
+                  padding: EdgeInsets.only(
+                    bottom: MediaQuery.of(c).viewInsets.bottom,
+                  ),
+                  child: Container(
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.vertical(
+                        top: Radius.circular(18),
+                      ),
+                    ),
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Center(
+                          child: Container(
+                            width: 40,
+                            height: 4,
+                            margin: const EdgeInsets.only(bottom: 12),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade300,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                        ),
+                        Text(
+                          'Add custom bill under ${pickedCategory.name}',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          controller: _quickController,
+                          decoration: const InputDecoration(
+                            hintText: 'e.g., Local Water Board',
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: () => Navigator.of(c).pop(null),
+                                child: const Text('Cancel'),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: ElevatedButton(
+                                onPressed: () => Navigator.of(c).pop(
+                                  _quickController.text.trim().isEmpty
+                                      ? null
+                                      : _quickController.text.trim(),
+                                ),
+                                child: const Text('Add'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            );
+
+            if (manualName != null && manualName.isNotEmpty) {
+              setState(() {
+                _selectedCategory = pickedCategory;
+                _nameController.text = manualName;
+              });
+            }
+          } else {
+            // User picked a predefined bill name
+            setState(() {
+              _selectedCategory = pickedCategory;
+              _nameController.text = pickedBill;
+            });
+          }
+        }
+      } else {
+        // Category has no predefined bills — just set category and let user type name if needed
+        setState(() {
+          _selectedCategory = pickedCategory;
+        });
+      }
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.85,
+          minChildSize: 0.5,
+          maxChildSize: 0.95,
+          expand: false,
+          builder: (context, scrollController) {
+            return Container(
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+              ),
+              child: SafeArea(
+                top: false,
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    left: 20.0,
+                    right: 20.0,
+                    top: 12.0,
+                    bottom: MediaQuery.of(context).viewInsets.bottom + 12.0,
+                  ),
+                  child: StatefulBuilder(
+                    builder: (BuildContext context, StateSetter setState) {
+                      return Column(
+                        children: [
+                          // Grab handle
+                          Container(
+                            width: 44,
+                            height: 5,
+                            margin: const EdgeInsets.only(top: 6, bottom: 14),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade300,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+
+                          // Title
+                          Row(
+                            children: [
+                              Container(
+                                width: 36,
+                                height: 36,
+                                decoration: BoxDecoration(
+                                  color: kPrimaryColor.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Icon(
+                                  Icons.add,
+                                  color: kPrimaryColor,
+                                  size: 20,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Add bill',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleLarge
+                                        ?.copyWith(fontWeight: FontWeight.w700),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'Quickly add a subscription',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodySmall,
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+
+                          const SizedBox(height: 14),
+
+                          // Form area
+                          Expanded(
+                            child: SingleChildScrollView(
+                              controller: scrollController,
+                              child: Form(
+                                key: _formKey,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    // Bill Details Card (name now opens category-first picker)
+                                    Card(
+                                      elevation: 0,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      color: Colors.grey.shade50,
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(12.0),
+                                        child: Column(
+                                          children: [
+                                            // Name field (readOnly) — tapping opens category/bill picker
+                                            TextFormField(
+                                              controller: _nameController,
+                                              readOnly: true,
+                                              onTap: () async {
+                                                await _showCategoryThenBillsPicker(
+                                                  context,
+                                                  setState,
+                                                );
+                                              },
+                                              decoration: InputDecoration(
+                                                hintText:
+                                                    'Tap to choose category & bill (or add custom)',
+                                                prefixIcon: const Icon(
+                                                  Icons.subscriptions,
+                                                ),
+                                                suffixIcon:
+                                                    _selectedCategory != null
+                                                    ? Container(
+                                                        margin:
+                                                            const EdgeInsets.only(
+                                                              right: 8,
+                                                            ),
+                                                        padding:
+                                                            const EdgeInsets.symmetric(
+                                                              horizontal: 8,
+                                                              vertical: 4,
+                                                            ),
+                                                        decoration: BoxDecoration(
+                                                          color: _selectedCategory
+                                                              .backgroundColor,
+                                                          borderRadius:
+                                                              BorderRadius.circular(
+                                                                8,
+                                                              ),
+                                                        ),
+                                                        child: Row(
+                                                          mainAxisSize:
+                                                              MainAxisSize.min,
+                                                          children: [
+                                                            Icon(
+                                                              _selectedCategory
+                                                                  .icon,
+                                                              size: 14,
+                                                              color:
+                                                                  _selectedCategory
+                                                                      .color,
+                                                            ),
+                                                            const SizedBox(
+                                                              width: 6,
+                                                            ),
+                                                            Text(
+                                                              _selectedCategory
+                                                                  .name,
+                                                              style:
+                                                                  const TextStyle(
+                                                                    fontSize:
+                                                                        12,
+                                                                  ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      )
+                                                    : null,
+                                                border: OutlineInputBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(10),
+                                                  borderSide: BorderSide.none,
+                                                ),
+                                                filled: true,
+                                                fillColor: Colors.white,
+                                              ),
+                                              validator: (v) =>
+                                                  (v == null || v.isEmpty)
+                                                  ? 'Please choose or enter a bill name'
+                                                  : null,
+                                            ),
+
+                                            const SizedBox(height: 10),
+
+                                            // Amount
+                                            TextFormField(
+                                              controller: _amountController,
+                                              keyboardType:
+                                                  const TextInputType.numberWithOptions(
+                                                    decimal: true,
+                                                  ),
+                                              decoration: InputDecoration(
+                                                hintText:
+                                                    'Amount (e.g., 15.99)',
+                                                prefixIcon: const Icon(
+                                                  Icons.attach_money,
+                                                ),
+                                                border: OutlineInputBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(10),
+                                                  borderSide: BorderSide.none,
+                                                ),
+                                                filled: true,
+                                                fillColor: Colors.white,
+                                              ),
+                                              validator: (v) {
+                                                if (v == null || v.isEmpty)
+                                                  return 'Please enter amount';
+                                                if (double.tryParse(v) == null)
+                                                  return 'Please enter a valid amount';
+                                                return null;
+                                              },
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+
+                                    const SizedBox(height: 12),
+
+                                    // Schedule row
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: GestureDetector(
+                                            onTap: () async {
+                                              final DateTime? picked =
+                                                  await showDatePicker(
+                                                    context: context,
+                                                    initialDate:
+                                                        _selectedDate ??
+                                                        DateTime.now().add(
+                                                          const Duration(
+                                                            days: 1,
+                                                          ),
+                                                        ),
+                                                    firstDate: DateTime.now(),
+                                                    lastDate: DateTime(2100),
+                                                  );
+                                              if (picked != null) {
+                                                setState(() {
+                                                  _selectedDate = DateTime(
+                                                    picked.year,
+                                                    picked.month,
+                                                    picked.day,
+                                                    _selectedTime?.hour ?? 9,
+                                                    _selectedTime?.minute ?? 0,
+                                                  );
+                                                  _dueDateController.text =
+                                                      '${picked.day.toString().padLeft(2, '0')}/${picked.month.toString().padLeft(2, '0')}/${picked.year}';
+                                                });
+                                              }
+                                            },
+                                            child: AbsorbPointer(
+                                              child: TextFormField(
+                                                controller: _dueDateController,
+                                                decoration: InputDecoration(
+                                                  labelText: 'Due Date',
+                                                  prefixIcon: const Icon(
+                                                    Icons.calendar_today,
+                                                  ),
+                                                  border: OutlineInputBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          10,
+                                                        ),
+                                                  ),
+                                                  filled: true,
+                                                  fillColor: Colors.white,
+                                                ),
+                                                validator: (v) =>
+                                                    (v == null || v.isEmpty)
+                                                    ? 'Please select due date'
+                                                    : null,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: GestureDetector(
+                                            onTap: () async {
+                                              final TimeOfDay? picked =
+                                                  await showTimePicker(
+                                                    context: context,
+                                                    initialTime:
+                                                        _selectedTime ??
+                                                        const TimeOfDay(
+                                                          hour: 9,
+                                                          minute: 0,
+                                                        ),
+                                                  );
+                                              if (picked != null) {
+                                                setState(() {
+                                                  _selectedTime = picked;
+                                                  _dueTimeController.text =
+                                                      picked.format(context);
+                                                  if (_selectedDate != null) {
+                                                    _selectedDate = DateTime(
+                                                      _selectedDate!.year,
+                                                      _selectedDate!.month,
+                                                      _selectedDate!.day,
+                                                      picked.hour,
+                                                      picked.minute,
+                                                    );
+                                                  }
+                                                });
+                                              }
+                                            },
+                                            child: AbsorbPointer(
+                                              child: TextFormField(
+                                                controller: _dueTimeController,
+                                                decoration: InputDecoration(
+                                                  labelText: 'Due Time',
+                                                  prefixIcon: const Icon(
+                                                    Icons.access_time,
+                                                  ),
+                                                  border: OutlineInputBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          10,
+                                                        ),
+                                                  ),
+                                                  filled: true,
+                                                  fillColor: Colors.white,
+                                                ),
+                                                validator: (v) =>
+                                                    (v == null || v.isEmpty)
+                                                    ? 'Please select due time'
+                                                    : null,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+
+                                    const SizedBox(height: 12),
+
+                                    // Frequency / Reminder
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: InkWell(
+                                            onTap: () async {
+                                              final choice =
+                                                  await _showChoiceSheet<
+                                                    String
+                                                  >(
+                                                    context,
+                                                    title: 'Frequency',
+                                                    options: [
+                                                      'Daily',
+                                                      'Weekly',
+                                                      'Monthly',
+                                                      'Yearly',
+                                                    ],
+                                                    label: (s) => s,
+                                                  );
+                                              if (choice != null)
+                                                setState(
+                                                  () => _selectedFrequency =
+                                                      choice,
+                                                );
+                                            },
+                                            child: Container(
+                                              padding: const EdgeInsets.all(12),
+                                              decoration: BoxDecoration(
+                                                borderRadius:
+                                                    BorderRadius.circular(10),
+                                                color: Colors.grey.shade50,
+                                              ),
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    'Frequency',
+                                                    style: Theme.of(
+                                                      context,
+                                                    ).textTheme.bodySmall,
+                                                  ),
+                                                  const SizedBox(height: 6),
+                                                  Row(
+                                                    mainAxisAlignment:
+                                                        MainAxisAlignment
+                                                            .spaceBetween,
+                                                    children: [
+                                                      Text(
+                                                        _selectedFrequency,
+                                                        style: const TextStyle(
+                                                          fontWeight:
+                                                              FontWeight.w600,
+                                                        ),
+                                                      ),
+                                                      const Icon(
+                                                        Icons
+                                                            .keyboard_arrow_down,
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: InkWell(
+                                            onTap: () async {
+                                              final choice =
+                                                  await _showChoiceSheet<
+                                                    String
+                                                  >(
+                                                    context,
+                                                    title: 'Reminder',
+                                                    options: [
+                                                      'Same day',
+                                                      '1 day before',
+                                                      '3 days before',
+                                                      '1 week before',
+                                                    ],
+                                                    label: (s) => s,
+                                                  );
+                                              if (choice != null)
+                                                setState(
+                                                  () => _selectedReminder =
+                                                      choice,
+                                                );
+                                            },
+                                            child: Container(
+                                              padding: const EdgeInsets.all(12),
+                                              decoration: BoxDecoration(
+                                                borderRadius:
+                                                    BorderRadius.circular(10),
+                                                color: Colors.grey.shade50,
+                                              ),
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    'Reminder',
+                                                    style: Theme.of(
+                                                      context,
+                                                    ).textTheme.bodySmall,
+                                                  ),
+                                                  const SizedBox(height: 6),
+                                                  Row(
+                                                    mainAxisAlignment:
+                                                        MainAxisAlignment
+                                                            .spaceBetween,
+                                                    children: [
+                                                      Text(
+                                                        _selectedReminder,
+                                                        style: const TextStyle(
+                                                          fontWeight:
+                                                              FontWeight.w600,
+                                                        ),
+                                                      ),
+                                                      const Icon(
+                                                        Icons
+                                                            .keyboard_arrow_down,
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+
+                                    const SizedBox(height: 12),
+
+                                    // Notification Time
+                                    InkWell(
+                                      onTap: () async {
+                                        final TimeOfDay?
+                                        pickedTime = await showTimePicker(
+                                          context: context,
+                                          initialTime:
+                                              _selectedNotificationTime,
+                                          builder:
+                                              (
+                                                BuildContext context,
+                                                Widget? child,
+                                              ) {
+                                                return Theme(
+                                                  data: ThemeData.light().copyWith(
+                                                    timePickerTheme:
+                                                        TimePickerThemeData(
+                                                          backgroundColor:
+                                                              Colors.white,
+                                                          hourMinuteColor:
+                                                              kPrimaryColor
+                                                                  .withOpacity(
+                                                                    0.1,
+                                                                  ),
+                                                          hourMinuteTextColor:
+                                                              kPrimaryColor,
+                                                          dialHandColor:
+                                                              kPrimaryColor,
+                                                          dialTextColor:
+                                                              Colors.black87,
+                                                        ),
+                                                  ),
+                                                  child: child!,
+                                                );
+                                              },
+                                        );
+                                        if (pickedTime != null) {
+                                          setState(() {
+                                            _selectedNotificationTime =
+                                                pickedTime;
+                                          });
+                                        }
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(
+                                          borderRadius: BorderRadius.circular(
+                                            10,
+                                          ),
+                                          color: Colors.grey.shade50,
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              'Notification Time',
+                                              style: Theme.of(
+                                                context,
+                                              ).textTheme.bodySmall,
+                                            ),
+                                            const SizedBox(height: 6),
+                                            Row(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment
+                                                      .spaceBetween,
+                                              children: [
+                                                Text(
+                                                  _selectedNotificationTime
+                                                      .format(context),
+                                                  style: const TextStyle(
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                                const Icon(
+                                                  Icons.access_time,
+                                                  size: 18,
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+
+                                    const SizedBox(height: 12),
+
+                                    // Notes
+                                    TextFormField(
+                                      controller: _notesController,
+                                      maxLines: 3,
+                                      decoration: InputDecoration(
+                                        hintText: 'Notes (optional)',
+                                        border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            10,
+                                          ),
+                                          borderSide: BorderSide.none,
+                                        ),
+                                        filled: true,
+                                        fillColor: Colors.white,
+                                      ),
+                                    ),
+
+                                    const SizedBox(height: 18),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          // Sticky actions
+                          Container(
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            color: Colors.white,
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton(
+                                    onPressed: () => Navigator.pop(context),
+                                    style: OutlinedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 14,
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                    ),
+                                    child: const Text('Cancel'),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: ElevatedButton(
+                                    onPressed: () async {
+                                      if (_formKey.currentState!.validate()) {
+                                        if (_selectedTime == null) {
+                                          _selectedTime = const TimeOfDay(
+                                            hour: 9,
+                                            minute: 0,
+                                          );
+                                          _dueTimeController.text =
+                                              _selectedTime!.format(context);
+                                          if (_selectedDate != null) {
+                                            _selectedDate = DateTime(
+                                              _selectedDate!.year,
+                                              _selectedDate!.month,
+                                              _selectedDate!.day,
+                                              _selectedTime!.hour,
+                                              _selectedTime!.minute,
+                                            );
+                                          }
+                                        }
+
+                                        // Generate a unique ID for this bill
+                                        final billId = DateTime.now()
+                                            .millisecondsSinceEpoch
+                                            .toString();
+
+                                        final subscription = {
+                                          'id': billId,
+                                          'name': _nameController.text,
+                                          'amount': _amountController.text,
+                                          'dueDate': _dueDateController.text,
+                                          'dueTime': _dueTimeController.text,
+                                          'dueDateTime': _selectedDate
+                                              ?.toIso8601String(),
+                                          'frequency': _selectedFrequency,
+                                          'reminder': _selectedReminder,
+                                          'notificationTime':
+                                              '${_selectedNotificationTime.hour}:${_selectedNotificationTime.minute}',
+                                          'category': _selectedCategory.id,
+                                          'categoryName':
+                                              _selectedCategory.name,
+                                          'categoryColor': _selectedCategory
+                                              .color
+                                              .toARGB32(),
+                                          'categoryBackgroundColor':
+                                              _selectedCategory.backgroundColor
+                                                  .toARGB32(),
+                                          'notes': _notesController.text.isEmpty
+                                              ? null
+                                              : _notesController.text,
+                                        };
+
+                                        await _addSubscription(subscription);
+
+                                        // Schedule notification
+                                        if (_selectedDate != null) {
+                                          final notificationService =
+                                              NotificationService();
+                                          await notificationService
+                                              .scheduleBillReminder(
+                                                id: DateTime.now()
+                                                    .millisecondsSinceEpoch,
+                                                title:
+                                                    'Bill Due: ${_nameController.text}',
+                                                body:
+                                                    'Your bill for ${_amountController.text} is due ${_selectedReminder.toLowerCase()}',
+                                                dueDate: _selectedDate!,
+                                                reminderPreference:
+                                                    _selectedReminder,
+                                                customNotificationTime:
+                                                    _selectedTime,
+                                                payload: billId,
+                                              );
+
+                                          // Store notification ID with the bill for later cancellation
+                                          subscription['notificationId'] =
+                                              DateTime.now()
+                                                  .millisecondsSinceEpoch;
+                                        }
+                                        if (Navigator.canPop(context))
+                                          Navigator.pop(context);
+                                      }
+                                    },
+                                    style: ElevatedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 14,
+                                      ),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                    ),
+                                    child: const Text('Add Subscription'),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void showCategoryBillsBottomSheet(BuildContext context, Category category) {
+    // Filter bills for the selected category
+    final categoryBills = _bills
+        .where(
+          (bill) =>
+              bill['category']?.toLowerCase() == category.name.toLowerCase(),
+        )
+        .toList();
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => Container(
-        height: MediaQuery.of(context).size.height * 0.5,
+        height: MediaQuery.of(context).size.height * 0.7,
         decoration: const BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
-        child: Padding(
-          padding: EdgeInsets.only(
-            left: 20.0,
-            right: 20.0,
-            top: 20.0,
-            bottom: MediaQuery.of(context).viewInsets.bottom + 20.0,
-          ),
-          child: StatefulBuilder(
-            builder: (BuildContext context, StateSetter setState) {
-              return Form(
-                key: _formKey,
-                child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(
-                              color: kPrimaryColor.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Icon(
-                              Icons.add,
-                              color: kPrimaryColor,
-                              size: 18,
-                            ),
+        child: Column(
+          children: [
+            // Header
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: category.backgroundColor.withOpacity(0.1),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(20),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: category.backgroundColor,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(category.icon, color: category.color, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          category.name,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black87,
                           ),
-                          const SizedBox(width: 10),
+                        ),
+                        Text(
+                          '${categoryBills.length} bills',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+            ),
+
+            // Bills List
+            Expanded(
+              child: categoryBills.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.receipt_long_outlined,
+                            size: 64,
+                            color: Colors.grey[400],
+                          ),
+                          const SizedBox(height: 16),
                           Text(
-                            'Add bill',
-                            style: Theme.of(context).textTheme.titleMedium
-                                ?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                  color: kPrimaryColor,
-                                  fontSize: 16,
-                                ),
+                            'No bills in ${category.name}',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Add a new bill to get started',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey[500],
+                            ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 18),
-                      TextFormField(
-                        controller: _nameController,
-                        style: const TextStyle(
-                          color: Colors.black,
-                          fontSize: 14,
-                        ),
-                        decoration: InputDecoration(
-                          labelText: 'bill Name',
-                          hintText: 'e.g., Netflix, Spotify',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(
-                              color: kPrimaryColor.withValues(alpha: 0.6),
-                              width: 1,
-                            ),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(
-                              color: kPrimaryColor.withValues(alpha: 0.6),
-                              width: 1,
-                            ),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(
-                              color: kPrimaryColor,
-                              width: 1.5,
-                            ),
-                          ),
-                          filled: true,
-                          fillColor: Colors.grey[50],
-                          prefixIcon: Container(
-                            margin: const EdgeInsets.all(8),
-                            padding: const EdgeInsets.all(4),
-                            decoration: BoxDecoration(
-                              color: Colors.blue.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Icon(
-                              Icons.subscriptions,
-                              color: Colors.blue[700],
-                              size: 16,
-                            ),
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                          labelStyle: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                          ),
-                          hintStyle: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[400],
-                          ),
-                        ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Please enter subscription name';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 14),
-                      TextFormField(
-                        controller: _amountController,
-                        style: const TextStyle(
-                          color: Colors.black,
-                          fontSize: 14,
-                        ),
-                        decoration: InputDecoration(
-                          labelText: 'Amount',
-                          hintText: 'e.g., 15.99',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(
-                              color: kPrimaryColor.withValues(alpha: 0.6),
-                              width: 1,
-                            ),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(
-                              color: kPrimaryColor.withValues(alpha: 0.6),
-                              width: 1,
-                            ),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(
-                              color: kPrimaryColor,
-                              width: 1.5,
-                            ),
-                          ),
-                          filled: true,
-                          fillColor: Colors.grey[50],
-                          prefixIcon: Container(
-                            margin: const EdgeInsets.all(8),
-                            padding: const EdgeInsets.all(4),
-                            decoration: BoxDecoration(
-                              color: Colors.green.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Icon(
-                              Icons.attach_money,
-                              color: Colors.green[700],
-                              size: 16,
-                            ),
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                          labelStyle: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                          ),
-                          hintStyle: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[400],
-                          ),
-                        ),
-                        keyboardType: TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Please enter amount';
-                          }
-                          if (double.tryParse(value) == null) {
-                            return 'Please enter a valid amount';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 14),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextFormField(
-                              controller: _dueDateController,
-                              style: const TextStyle(
-                                color: Colors.black,
-                                fontSize: 14,
-                              ),
-                              readOnly: true,
-                              onTap: () async {
-                                final DateTime? picked = await showDatePicker(
-                                  context: context,
-                                  initialDate:
-                                      _selectedDate ??
-                                      DateTime.now().add(
-                                        const Duration(days: 1),
-                                      ),
-                                  firstDate: DateTime.now(),
-                                  lastDate: DateTime(2100),
-                                  builder: (context, child) {
-                                    return Theme(
-                                      data: Theme.of(context).copyWith(
-                                        colorScheme: ColorScheme.light(
-                                          primary: kPrimaryColor,
-                                          onPrimary: Colors.white,
-                                          surface: Colors.white,
-                                          onSurface: Colors.black,
-                                        ),
-                                      ),
-                                      child: child!,
-                                    );
-                                  },
-                                );
-                                if (picked != null) {
-                                  setState(() {
-                                    _selectedDate = DateTime(
-                                      picked.year,
-                                      picked.month,
-                                      picked.day,
-                                      _selectedTime?.hour ?? 0,
-                                      _selectedTime?.minute ?? 0,
-                                    );
-                                    _dueDateController.text =
-                                        '${picked.day.toString().padLeft(2, '0')}/${picked.month.toString().padLeft(2, '0')}/${picked.year}';
-                                  });
-                                }
-                              },
-                              decoration: InputDecoration(
-                                labelText: 'Due Date',
-                                hintText: 'Select date',
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: BorderSide(
-                                    color: kPrimaryColor.withValues(alpha: 0.6),
-                                    width: 1,
-                                  ),
-                                ),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: BorderSide(
-                                    color: kPrimaryColor.withValues(alpha: 0.6),
-                                    width: 1,
-                                  ),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: BorderSide(
-                                    color: kPrimaryColor,
-                                    width: 1.5,
-                                  ),
-                                ),
-                                filled: true,
-                                fillColor: Colors.grey[50],
-                                prefixIcon: Container(
-                                  margin: const EdgeInsets.all(8),
-                                  padding: const EdgeInsets.all(4),
-                                  decoration: BoxDecoration(
-                                    color: Colors.purple.withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Icon(
-                                    Icons.calendar_today,
-                                    color: Colors.purple[700],
-                                    size: 16,
-                                  ),
-                                ),
-                                suffixIcon: Icon(
-                                  Icons.arrow_drop_down,
-                                  color: kPrimaryColor,
-                                  size: 18,
-                                ),
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
-                                ),
-                                labelStyle: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey[600],
-                                ),
-                                hintStyle: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey[400],
-                                ),
-                              ),
-                              validator: (value) {
-                                if (value == null || value.isEmpty) {
-                                  return 'Please select due date';
-                                }
-                                return null;
-                              },
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: TextFormField(
-                              controller: _dueTimeController,
-                              style: const TextStyle(
-                                color: Colors.black,
-                                fontSize: 14,
-                              ),
-                              readOnly: true,
-                              onTap: () async {
-                                final TimeOfDay? picked = await showTimePicker(
-                                  context: context,
-                                  initialTime:
-                                      _selectedTime ??
-                                      const TimeOfDay(hour: 9, minute: 0),
-                                  builder: (context, child) {
-                                    return Theme(
-                                      data: Theme.of(context).copyWith(
-                                        colorScheme: ColorScheme.light(
-                                          primary: kPrimaryColor,
-                                          onPrimary: Colors.white,
-                                          surface: Colors.white,
-                                          onSurface: Colors.black,
-                                        ),
-                                      ),
-                                      child: child!,
-                                    );
-                                  },
-                                );
-                                if (picked != null) {
-                                  setState(() {
-                                    _selectedTime = picked;
-                                    _dueTimeController.text = picked.format(
-                                      context,
-                                    );
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: categoryBills.length,
+                      itemBuilder: (context, index) {
+                        final bill = categoryBills[index];
+                        final dueDate = _parseDueDate(bill);
+                        final now = DateTime.now();
+                        final isOverdue =
+                            dueDate != null &&
+                            dueDate.isBefore(now) &&
+                            bill['status'] != 'paid';
+                        final isPaid = bill['status'] == 'paid';
 
-                                    // Update selectedDate with the new time
-                                    if (_selectedDate != null) {
-                                      _selectedDate = DateTime(
-                                        _selectedDate!.year,
-                                        _selectedDate!.month,
-                                        _selectedDate!.day,
-                                        picked.hour,
-                                        picked.minute,
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.grey[200]!),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.05),
+                                blurRadius: 4,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: ListTile(
+                            contentPadding: const EdgeInsets.all(16),
+                            title: Text(
+                              bill['name'] ?? 'Unnamed Bill',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 16,
+                              ),
+                            ),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    Icon(
+                                      Icons.calendar_today_outlined,
+                                      size: 14,
+                                      color: Colors.grey[600],
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      dueDate != null
+                                          ? _formatDate(dueDate)
+                                          : 'No due date',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: Colors.grey[600],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      '\$${_parseAmount(bill['amount']).toStringAsFixed(2)}',
+                                      style: TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold,
+                                        color: isPaid
+                                            ? Colors.green
+                                            : (isOverdue
+                                                  ? Colors.red
+                                                  : Colors.black87),
+                                      ),
+                                    ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: isPaid
+                                            ? Colors.green.withOpacity(0.1)
+                                            : (isOverdue
+                                                  ? Colors.red.withOpacity(0.1)
+                                                  : Colors.orange.withOpacity(
+                                                      0.1,
+                                                    )),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Text(
+                                        isPaid
+                                            ? 'Paid'
+                                            : (isOverdue
+                                                  ? 'Overdue'
+                                                  : 'Pending'),
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500,
+                                          color: isPaid
+                                              ? Colors.green[700]
+                                              : (isOverdue
+                                                    ? Colors.red[700]
+                                                    : Colors.orange[700]),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                            trailing: PopupMenuButton<String>(
+                              onSelected: (value) async {
+                                switch (value) {
+                                  case 'edit':
+                                    _editBill(_bills.indexOf(bill));
+                                    break;
+                                  case 'paid':
+                                    await _markBillAsPaid(_bills.indexOf(bill));
+                                    break;
+                                  case 'delete':
+                                    bool? confirm =
+                                        await _showDeleteConfirmDialog(context);
+                                    if (confirm == true) {
+                                      await _deleteSubscription(
+                                        _bills.indexOf(bill),
                                       );
                                     }
-                                  });
+                                    break;
                                 }
                               },
-                              decoration: InputDecoration(
-                                labelText: 'Due Time',
-                                hintText: 'Select time',
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: BorderSide(
-                                    color: kPrimaryColor.withValues(alpha: 0.6),
-                                    width: 1,
-                                  ),
-                                ),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: BorderSide(
-                                    color: kPrimaryColor.withValues(alpha: 0.6),
-                                    width: 1,
-                                  ),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: BorderSide(
-                                    color: kPrimaryColor,
-                                    width: 1.5,
-                                  ),
-                                ),
-                                filled: true,
-                                fillColor: Colors.grey[50],
-                                prefixIcon: Container(
-                                  margin: const EdgeInsets.all(8),
-                                  padding: const EdgeInsets.all(4),
-                                  decoration: BoxDecoration(
-                                    color: Colors.orange.withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Icon(
-                                    Icons.access_time,
-                                    color: Colors.orange[700],
-                                    size: 16,
-                                  ),
-                                ),
-                                suffixIcon: Icon(
-                                  Icons.arrow_drop_down,
-                                  color: kPrimaryColor,
-                                  size: 18,
-                                ),
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
-                                ),
-                                labelStyle: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey[600],
-                                ),
-                                hintStyle: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey[400],
-                                ),
-                              ),
-                              validator: (value) {
-                                if (value == null || value.isEmpty) {
-                                  return 'Please select due time';
-                                }
-                                return null;
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      GestureDetector(
-                        onTap: () {
-                          _showFrequencyBottomSheet(context, (frequency) {
-                            setState(() {
-                              _selectedFrequency = frequency;
-                            });
-                          });
-                        },
-                        child: Container(
-                          decoration: BoxDecoration(
-                            border: Border.all(
-                              color: kPrimaryColor.withAlpha(77),
-                            ),
-                            borderRadius: BorderRadius.circular(8),
-                            color: Colors.grey[50],
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                            child: Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(4),
-                                  decoration: BoxDecoration(
-                                    color: Colors.orange.withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Icon(
-                                    Icons.repeat,
-                                    color: Colors.orange[700],
-                                    size: 16,
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
+                              itemBuilder: (context) => [
+                                const PopupMenuItem(
+                                  value: 'edit',
+                                  child: Row(
                                     children: [
-                                      Text(
-                                        'Frequency',
-                                        style: TextStyle(
-                                          color: Colors.grey[600],
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        _selectedFrequency,
-                                        style: const TextStyle(
-                                          color: Colors.black,
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
+                                      Icon(Icons.edit, size: 16),
+                                      SizedBox(width: 8),
+                                      Text('Edit'),
                                     ],
                                   ),
                                 ),
-                                Icon(
-                                  Icons.arrow_drop_down,
-                                  color: kPrimaryColor,
-                                  size: 18,
+                                if (!isPaid)
+                                  const PopupMenuItem(
+                                    value: 'paid',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.check_circle, size: 16),
+                                        SizedBox(width: 8),
+                                        Text('Mark as Paid'),
+                                      ],
+                                    ),
+                                  ),
+                                const PopupMenuItem(
+                                  value: 'delete',
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.delete, size: 16),
+                                      SizedBox(width: 8),
+                                      Text('Delete'),
+                                    ],
+                                  ),
                                 ),
                               ],
                             ),
                           ),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      GestureDetector(
-                        onTap: () {
-                          _showReminderBottomSheet(context, (reminder) {
-                            setState(() {
-                              _selectedReminder = reminder;
-                            });
-                          });
-                        },
-                        child: Container(
-                          decoration: BoxDecoration(
-                            border: Border.all(
-                              color: kPrimaryColor.withAlpha(77),
-                            ),
-                            borderRadius: BorderRadius.circular(8),
-                            color: Colors.grey[50],
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                            child: Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(4),
-                                  decoration: BoxDecoration(
-                                    color: Colors.red.withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Icon(
-                                    Icons.notifications,
-                                    color: Colors.red[700],
-                                    size: 16,
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Reminder',
-                                        style: TextStyle(
-                                          color: Colors.grey[600],
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        _selectedReminder,
-                                        style: const TextStyle(
-                                          color: Colors.black,
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                Icon(
-                                  Icons.arrow_drop_down,
-                                  color: kPrimaryColor,
-                                  size: 18,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      GestureDetector(
-                        onTap: () {
-                          _showCategoryBottomSheet(context, (category) {
-                            setState(() {
-                              _selectedCategory = category;
-                            });
-                          });
-                        },
-                        child: Container(
-                          decoration: BoxDecoration(
-                            border: Border.all(
-                              color: kPrimaryColor.withAlpha(77),
-                            ),
-                            borderRadius: BorderRadius.circular(8),
-                            color: Colors.grey[50],
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 28,
-                                  height: 28,
-                                  decoration: BoxDecoration(
-                                    color: _selectedCategory.backgroundColor,
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Icon(
-                                    _selectedCategory.icon,
-                                    color: _selectedCategory.color,
-                                    size: 16,
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Category',
-                                        style: TextStyle(
-                                          color: Colors.grey[600],
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        _selectedCategory.name,
-                                        style: const TextStyle(
-                                          color: Colors.black,
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                Icon(
-                                  Icons.arrow_drop_down,
-                                  color: kPrimaryColor,
-                                  size: 18,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      TextFormField(
-                        controller: _notesController,
-                        style: const TextStyle(
-                          color: Colors.black,
-                          fontSize: 14,
-                        ),
-                        maxLines: 2,
-                        decoration: InputDecoration(
-                          labelText: 'Notes (Optional)',
-                          hintText: 'Add any additional notes...',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(
-                              color: kPrimaryColor.withValues(alpha: 0.6),
-                              width: 1,
-                            ),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(
-                              color: kPrimaryColor.withValues(alpha: 0.6),
-                              width: 1,
-                            ),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(
-                              color: kPrimaryColor,
-                              width: 1.5,
-                            ),
-                          ),
-                          filled: true,
-                          fillColor: Colors.grey[50],
-                          prefixIcon: Container(
-                            margin: const EdgeInsets.all(8),
-                            padding: const EdgeInsets.all(4),
-                            decoration: BoxDecoration(
-                              color: Colors.teal.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Icon(
-                              Icons.note,
-                              color: Colors.teal[700],
-                              size: 16,
-                            ),
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                          labelStyle: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                          ),
-                          hintStyle: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[400],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: () {
-                                Navigator.pop(context);
-                              },
-                              style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 12,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                side: BorderSide(color: Colors.grey.shade300),
-                              ),
-                              child: const Text(
-                                'Cancel',
-                                style: TextStyle(fontSize: 14),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: ElevatedButton(
-                              onPressed: () async {
-                                if (_formKey.currentState!.validate()) {
-                                  // Ensure we have a time set (default to 9:00 AM if not selected)
-                                  if (_selectedTime == null) {
-                                    _selectedTime = const TimeOfDay(
-                                      hour: 9,
-                                      minute: 0,
-                                    );
-                                    _dueTimeController.text = _selectedTime!
-                                        .format(context);
+                        );
+                      },
+                    ),
+            ),
 
-                                    // Update selectedDate with default time
-                                    if (_selectedDate != null) {
-                                      _selectedDate = DateTime(
-                                        _selectedDate!.year,
-                                        _selectedDate!.month,
-                                        _selectedDate!.day,
-                                        _selectedTime!.hour,
-                                        _selectedTime!.minute,
-                                      );
-                                    }
-                                  }
-
-                                  // Create full due date string with time
-                                  String fullDueDate = _dueDateController.text;
-                                  if (_selectedTime != null) {
-                                    fullDueDate +=
-                                        ' ${_selectedTime!.format(context)}';
-                                  }
-
-                                  final subscription = {
-                                    'name': _nameController.text,
-                                    'amount': _amountController.text,
-                                    'dueDate': _dueDateController.text,
-                                    'dueTime': _dueTimeController.text,
-                                    'dueDateTime': _selectedDate
-                                        ?.toIso8601String(),
-                                    'frequency': _selectedFrequency,
-                                    'reminder': _selectedReminder,
-                                    'category': _selectedCategory.id,
-                                    'categoryName': _selectedCategory.name,
-                                    'categoryColor': _selectedCategory.color
-                                        .toARGB32(),
-                                    'categoryBackgroundColor': _selectedCategory
-                                        .backgroundColor
-                                        .toARGB32(),
-                                    'notes': _notesController.text.isEmpty
-                                        ? null
-                                        : _notesController.text,
-                                  };
-                                  await _addSubscription(subscription);
-                                  if (mounted) {
-                                    Navigator.pop(context);
-                                  }
-                                }
-                              },
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: kPrimaryColor,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 12,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                              ),
-                              child: const Text(
-                                'Add Subscription',
-                                style: TextStyle(fontSize: 14),
-                              ),
-                            ),
-                          ),
-                        ],
+            // Add New Bill Button
+            if (categoryBills.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(context); // Close bills bottom sheet
+                      // Return to add bill flow with this category pre-selected
+                      Navigator.pop(context, category);
+                    },
+                    icon: const Icon(Icons.add),
+                    label: Text('Add ${category.name} Bill'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: category.backgroundColor,
+                      foregroundColor: category.color,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                    ],
+                    ),
                   ),
                 ),
-              );
-            },
-          ),
+              ),
+          ],
         ),
       ),
     );
@@ -4013,88 +4725,34 @@ class HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _addSubscription(Map<String, dynamic> subscription) async {
-    // Check network status first
-    await _checkConnectivity();
-    debugPrint('Adding subscription. Network status: $_isOnline');
+  Future<void> addSubscription(Map<dynamic, dynamic> subscription) async {
+    try {
+      // Convert Map<dynamic, dynamic> to Map<String, dynamic> for the service
+      final Map<String, dynamic> convertedSubscription = subscription.map(
+        (key, value) => MapEntry(key.toString(), value),
+      );
 
-    if (_isOnline) {
-      try {
-        // Try to add to Firebase first
-        await _subscriptionService.addSubscription(subscription);
+      await _subscriptionService.addSubscription(convertedSubscription);
+      await _loadSubscriptions(); // Refresh the list
 
-        // If successful, add to local list
-        if (mounted) {
-          setState(() {
-            _bills.add(subscription);
-            _checkForOverdueBills(); // Immediate check for overdue status
-          });
-
-          // Show success message
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('${subscription['name']} added successfully!'),
-              backgroundColor: Colors.green,
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-          );
-        }
-      } catch (e) {
-        // Re-check connectivity to make sure it's actually offline
-        await _checkConnectivity();
-
-        if (!_isOnline) {
-          // Only show offline message if actually offline
-          if (mounted) {
-            setState(() {
-              _bills.add(subscription);
-              _checkForOverdueBills(); // Immediate check for overdue status
-            });
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  '${subscription['name']} saved locally. Will sync when online.',
-                ),
-                backgroundColor: Colors.orange,
-                behavior: SnackBarBehavior.floating,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-            );
-          }
-        } else {
-          // If online but Firebase failed, show error message
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Failed to save to server. Please try again.'),
-                backgroundColor: Colors.red,
-                behavior: SnackBarBehavior.floating,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-            );
-          }
-        }
-      }
-    } else {
-      // Offline: Add to local list only
       if (mounted) {
-        setState(() {
-          _bills.add(subscription);
-          _checkForOverdueBills(); // Immediate check for overdue status
-        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              '${subscription['name']} saved locally. Will sync when online.',
+            content: Text('Subscription added successfully!'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
             ),
-            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to add subscription: $e'),
+            backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8),

@@ -1,16 +1,20 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:projeckt_k/services/auth_service.dart';
 import 'package:projeckt_k/screens/login_screen.dart';
 import 'package:projeckt_k/widgets/main_navigation_wrapper.dart';
 import 'package:projeckt_k/services/sync_notification_service.dart';
+import 'package:projeckt_k/services/notification_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await AuthService.initializeFirebase();
 
-  // Initialize global sync notification service
+  // Initialize global services
   final syncService = SyncNotificationService();
+  final notificationService = NotificationService();
+  await notificationService.init();
 
   runApp(MyApp(syncService: syncService));
 }
@@ -83,10 +87,31 @@ class AuthWrapper extends StatefulWidget {
 }
 
 class _AuthWrapperState extends State<AuthWrapper> {
+  late final AuthService _authService;
+  late final StreamSubscription<User?> _authSubscription;
+
   @override
   void initState() {
     super.initState();
     widget.syncService.init();
+    _authService = AuthService();
+
+    // Listen to auth state changes
+    _authSubscription = _authService.authStateChanges.listen((user) {
+      if (user != null && mounted) {
+        // User just logged in
+        _requestNotificationPermissions();
+      }
+    });
+
+    // Check if user is already logged in
+    _requestNotificationPermissions();
+  }
+
+  @override
+  void dispose() {
+    _authSubscription.cancel();
+    super.dispose();
   }
 
   @override
@@ -94,6 +119,15 @@ class _AuthWrapperState extends State<AuthWrapper> {
     super.didChangeDependencies();
     // Set the context for the sync service
     widget.syncService.setContext(context);
+  }
+
+  Future<void> _requestNotificationPermissions() async {
+    // Check current user using FirebaseAuth instance
+    final user = _authService.currentUser;
+    if (user != null && mounted) {
+      final notificationService = NotificationService();
+      await notificationService.requestNotificationPermissions(context);
+    }
   }
 
   @override

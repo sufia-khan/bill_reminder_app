@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:projeckt_k/services/notification_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({Key? key}) : super(key: key);
@@ -22,11 +23,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadPreferences() async {
     final prefs = await SharedPreferences.getInstance();
+    final notificationService = NotificationService();
+    final defaultTime = await notificationService.getDefaultNotificationTime();
+
     setState(() {
       _notificationsEnabled = prefs.getBool('notifications_enabled') ?? true;
       _darkMode = prefs.getBool('dark_mode') ?? false;
       _currency = prefs.getString('currency') ?? 'USD';
-      _reminderTime = prefs.getString('reminder_time') ?? '09:00';
+      _reminderTime = '${defaultTime.hour.toString().padLeft(2, '0')}:${defaultTime.minute.toString().padLeft(2, '0')}';
     });
   }
 
@@ -90,11 +94,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
               'Notifications',
               'Enable bill reminders',
               _notificationsEnabled,
-              (value) {
+              (value) async {
                 setState(() {
                   _notificationsEnabled = value;
                 });
                 _savePreference('notifications_enabled', value);
+
+                // If notifications are disabled, cancel all existing notifications
+                if (!value) {
+                  final notificationService = NotificationService();
+                  await notificationService.cancelAllNotifications();
+                }
+
                 _showSettingFeedback('Notifications ${value ? 'enabled' : 'disabled'}');
               },
               Icons.notifications_outlined,
@@ -116,6 +127,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
               Icons.access_time,
               Colors.orange,
               () => _showTimePicker(),
+            ),
+            _buildListTile(
+              'Notification Permissions',
+              'Check and manage notification permissions',
+              Icons.security,
+              Colors.red,
+              () => _checkNotificationPermissions(),
+            ),
+            _buildListTile(
+              'Test Notification',
+              'Send a test notification',
+              Icons.notifications_active,
+              Colors.green,
+              () => _sendTestNotification(),
             ),
           ]),
           const SizedBox(height: 24),
@@ -370,14 +395,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
         hour: int.parse(_reminderTime.split(':')[0]),
         minute: int.parse(_reminderTime.split(':')[1]),
       ),
-    ).then((time) {
+    ).then((time) async {
       if (time != null) {
         final newTime = '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
         setState(() {
           _reminderTime = newTime;
         });
         _savePreference('reminder_time', newTime);
-        _showSettingFeedback('Reminder time updated to $newTime');
+
+        // Update notification service default time
+        final notificationService = NotificationService();
+        await notificationService.setDefaultNotificationTime(time);
+
+        _showSettingFeedback('Default notification time updated to $newTime');
       }
     });
   }
@@ -465,17 +495,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  void _showSettingFeedback(String message) {
+  void _showSettingFeedback(String message, {Color backgroundColor = Colors.green}) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: Colors.green,
+        backgroundColor: backgroundColor,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8),
         ),
       ),
     );
+  }
+
+  Future<void> _checkNotificationPermissions() async {
+    final notificationService = NotificationService();
+    final isEnabled = await notificationService.areNotificationsEnabled();
+
+    if (isEnabled) {
+      _showSettingFeedback('Notifications are enabled', backgroundColor: Colors.green);
+    } else {
+      _showSettingFeedback('Notifications are disabled. Enable them in device settings.', backgroundColor: Colors.orange);
+      await notificationService.openNotificationSettings();
+    }
+  }
+
+  Future<void> _sendTestNotification() async {
+    final notificationService = NotificationService();
+    await notificationService.showImmediateNotification(
+      title: 'Test Notification',
+      body: 'This is a test notification from Bill Manager!',
+    );
+    _showSettingFeedback('Test notification sent!', backgroundColor: Colors.blue);
   }
 
   void _showPrivacyPolicy() {

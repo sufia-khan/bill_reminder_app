@@ -67,23 +67,30 @@ class SubscriptionService {
     try {
       List<Map<String, dynamic>> allSubscriptions = [];
 
-      // Try to get from Firebase
-      try {
-        final querySnapshot = await _subscriptionsCollection
-            .orderBy('createdAt', descending: true)
-            .get();
+      // Check connectivity to avoid unnecessary Firebase reads
+      final online = await isOnline();
 
-        final firebaseSubscriptions = querySnapshot.docs.map((doc) {
-          final data = doc.data() as Map<String, dynamic>;
-          data['id'] = doc.id;
-          data['firebaseId'] = doc.id;
-          data['source'] = 'firebase';
-          return data;
-        }).toList();
+      if (online) {
+        // Try to get from Firebase
+        try {
+          final querySnapshot = await _subscriptionsCollection
+              .orderBy('createdAt', descending: true)
+              .get();
 
-        allSubscriptions.addAll(firebaseSubscriptions);
-      } catch (e) {
-        debugPrint('Failed to get Firebase subscriptions: $e');
+          final firebaseSubscriptions = querySnapshot.docs.map((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            data['id'] = doc.id;
+            data['firebaseId'] = doc.id;
+            data['source'] = 'firebase';
+            return data;
+          }).toList();
+
+          allSubscriptions.addAll(firebaseSubscriptions);
+        } catch (e) {
+          debugPrint('Failed to get Firebase subscriptions: $e');
+        }
+      } else {
+        debugPrint('Offline detected: skipping Firebase read in getSubscriptions');
       }
 
       // Get local subscriptions that aren't synced

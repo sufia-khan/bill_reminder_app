@@ -84,7 +84,7 @@ class _ChangingSubtitleState extends State<ChangingSubtitle> {
         child: Text(
           _currentSubtitle.isEmpty ? " " : _currentSubtitle, // 👈 keep space
           style: const TextStyle(
-            color: Colors.white70,
+            color: Colors.black87,
             fontSize: 15,
             fontWeight: FontWeight.w500,
             letterSpacing: -0.2,
