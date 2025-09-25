@@ -41,17 +41,10 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
     AllBillsScreen(),
     SettingsScreen(),
   ];
-
-  // Lighter gradient for icons: increased lightness and a touch of opacity
-  List<Color> get _navGradientColors => [
-    HSLColor.fromAHSL(1.0, 250, 0.84, 0.74).toColor().withOpacity(0.95),
-    HSLColor.fromAHSL(1.0, 280, 0.75, 0.80).toColor().withOpacity(0.95),
-  ];
-
-  // Even lighter background tint for the floating button's shadow / ring
-  List<Color> get _navGradientColorsSoft => [
-    HSLColor.fromAHSL(1.0, 250, 0.84, 0.78).toColor().withOpacity(0.9),
-    HSLColor.fromAHSL(1.0, 280, 0.75, 0.83).toColor().withOpacity(0.9),
+  // gradient for icons & active labels
+  List<Color> get _iconGradientColors => [
+    HSLColor.fromAHSL(1.0, 250, 0.84, 0.60).toColor(),
+    HSLColor.fromAHSL(1.0, 280, 0.75, 0.65).toColor(),
   ];
 
   @override
@@ -60,17 +53,16 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
       body: _screens[_currentIndex],
       extendBody: true,
       bottomNavigationBar: Container(
-        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Colors.white, // nav bar background
           borderRadius: const BorderRadius.only(
             topLeft: Radius.circular(20),
             topRight: Radius.circular(20),
           ),
           boxShadow: [
-            // lighter shadow
             BoxShadow(
-              color: _navGradientColors.first.withOpacity(0.18),
+              color: _iconGradientColors.first.withOpacity(0.18),
               blurRadius: 18,
               spreadRadius: 1,
               offset: const Offset(0, 6),
@@ -83,7 +75,7 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
             _buildNavItem(Icons.home, 0, "Home"),
             _buildNavItem(Icons.analytics, 1, "Analytics"),
 
-            // Floating center button (lighter gradient overall)
+            // Floating Add Button
             GestureDetector(
               onTap: () {
                 if (_currentIndex == 0) {
@@ -98,44 +90,29 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
                 }
               },
               child: Container(
-                width: 54,
-                height: 54,
+                width: 58,
+                height: 58,
                 decoration: BoxDecoration(
-                  // a soft/lighter gradient for the circular background
                   gradient: LinearGradient(
+                    colors: _iconGradientColors,
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: _navGradientColorsSoft,
                   ),
                   shape: BoxShape.circle,
                   boxShadow: [
                     BoxShadow(
-                      color: _navGradientColorsSoft.first.withOpacity(0.22),
+                      color: _iconGradientColors.first.withOpacity(0.25),
                       blurRadius: 16,
                       spreadRadius: 2,
                       offset: const Offset(0, 6),
                     ),
                   ],
                 ),
-                child: Center(
-                  child: ShaderMask(
-                    blendMode: BlendMode.srcIn,
-                    shaderCallback: (bounds) => LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: _navGradientColors,
-                    ).createShader(bounds),
-                    child: const Icon(
-                      Icons.add,
-                      size: 26,
-                      color: Colors.white, // shader will tint this
-                    ),
-                  ),
-                ),
+                child: const Icon(Icons.add, size: 28, color: Colors.white),
               ),
             ),
 
-            _buildNavItem(Icons.receipt_long, 3, "Bills"),
+            _buildNavItem(Icons.receipt_long, 3, "Calender"),
             _buildNavItem(Icons.settings, 4, "Settings"),
           ],
         ),
@@ -148,33 +125,59 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
 
     return GestureDetector(
       onTap: () => setState(() => _currentIndex = index),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-        padding: const EdgeInsets.all(6),
-        decoration: BoxDecoration(
-          color: Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
-          border: isActive
-              ? Border.all(
-                  color: _navGradientColors.first.withOpacity(0.45),
-                  width: 1.2,
-                )
-              : null,
-        ),
-        child: ShaderMask(
-          blendMode: BlendMode.srcIn,
-          shaderCallback: (bounds) => LinearGradient(
-            colors: _navGradientColors,
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ).createShader(bounds),
-          child: Icon(
-            icon,
-            size: 24,
-            color: Colors.white, // gradient will replace this
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOut,
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: isActive
+                  ? Border.all(
+                      color: _iconGradientColors.first.withOpacity(0.45),
+                      width: 1.2,
+                    )
+                  : null,
+            ),
+            child: ShaderMask(
+              blendMode: BlendMode.srcIn,
+              shaderCallback: (bounds) => LinearGradient(
+                colors: _iconGradientColors,
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ).createShader(bounds),
+              child: Icon(icon, size: 24, color: Colors.white),
+            ),
           ),
-        ),
+          const SizedBox(height: 4),
+          isActive
+              ? ShaderMask(
+                  blendMode: BlendMode.srcIn,
+                  shaderCallback: (bounds) => LinearGradient(
+                    colors: _iconGradientColors,
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ).createShader(bounds),
+                  child: Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
+                )
+              : Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: Colors.grey.shade500,
+                  ),
+                ),
+        ],
       ),
     );
   }

@@ -13,25 +13,25 @@ class BillSummaryCard extends StatelessWidget {
     this.secondaryAmount,
     this.secondaryText,
 
-    // layout heights
-    this.topBoxHeight = 3,
-    this.middleBoxHeight = 70,
-    this.bottomBoxHeight = 45,
-    // font sizing
-    this.primaryFontSize = 36,
-    this.minPrimaryFontSize = 8,
-    this.bottomAmountFontSize = 12,
-    this.bottomTextFontSize = 13,
-    this.minBottomFontSize = 10,
-    // inner padding (space INSIDE the card between border and content)
-    this.innerPadding = const EdgeInsets.symmetric(
-      horizontal: 16,
-      vertical: 16,
-    ),
-    // icon + misc
-    this.iconSize = 36,
+    // ↓ Even smaller layout heights
+    this.topBoxHeight = 2,
+    this.middleBoxHeight = 42,
+    this.bottomBoxHeight = 28,
+
+    // ↓ Smaller font sizes
+    this.primaryFontSize = 20,
+    this.minPrimaryFontSize = 9,
+    this.bottomAmountFontSize = 10,
+    this.bottomTextFontSize = 10,
+    this.minBottomFontSize = 8,
+
+    // ↓ Reduced padding inside card
+    this.innerPadding = const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+
+    // ↓ Smaller icon
+    this.iconSize = 24,
     this.iconOnRight = false,
-    this.textIconGap = 6,
+    this.textIconGap = 5,
   }) : assert(gradientColors.length >= 2),
        super(key: key);
 

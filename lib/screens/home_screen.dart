@@ -33,7 +33,8 @@ class HomeScreenState extends State<HomeScreen> {
   bool _isOnline = false;
   StreamSubscription<bool>? _connectivitySubscription;
   Timer? _updateTimer;
-  String _selectedCategory = 'all'; // 'all' or specific category id
+  String selectedCategory = 'all'; // 'all' or specific category id
+  String selectedStatus = 'upcoming'; // 'upcoming', 'overdue', 'paid'
   // shared sizes
   // shared sizes
   double sharedTop = 36;
@@ -47,12 +48,17 @@ class HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _initServices();
+    _initializeApp();
+  }
 
-    _checkConnectivity();
-    _loadSubscriptions();
+  Future<void> _initializeApp() async {
+    debugPrint('🚀 Initializing app...');
+    await _initServices();
+    await _checkConnectivity();
+    await _loadSubscriptions();
     _setupConnectivityListener();
     _startPeriodicUpdates();
+    debugPrint('✅ App initialization completed');
   }
 
   Future<void> _initServices() async {
@@ -63,7 +69,7 @@ class HomeScreenState extends State<HomeScreen> {
     notificationService.onMarkAsPaid = (String? billId) {
       debugPrint('📝 Mark as paid callback received for bill ID: $billId');
       if (billId != null) {
-        _markBillAsPaidFromNotification(billId);
+        _markBillAsPaidFromNotification(billId!);
       }
     };
   }
@@ -199,19 +205,28 @@ class HomeScreenState extends State<HomeScreen> {
 
   Future<void> _autoSyncWhenOnline() async {
     try {
-      final success = await _subscriptionService.syncLocalToFirebase();
-      if (mounted) {
-        setState(() {});
-        if (success) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Auto-sync completed successfully!'),
-              backgroundColor: Colors.green,
-              duration: const Duration(seconds: 2),
-            ),
-          );
-          await _loadSubscriptions(); // Refresh the list
+      // Check if there's anything to sync first
+      final unsyncedCount = await _subscriptionService.getUnsyncedSubscriptionsCount();
+
+      if (unsyncedCount > 0) {
+        debugPrint('🔄 Found $unsyncedCount items to sync');
+        final success = await _subscriptionService.syncLocalToFirebase();
+
+        if (mounted) {
+          setState(() {});
+          if (success) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Auto-sync completed: $unsyncedCount items synced!'),
+                backgroundColor: Colors.green,
+                duration: const Duration(seconds: 2),
+              ),
+            );
+            await _loadSubscriptions(); // Refresh the list
+          }
         }
+      } else {
+        debugPrint('✅ No items to sync');
       }
     } catch (e) {
       debugPrint('Auto-sync failed: $e');
@@ -282,7 +297,7 @@ class HomeScreenState extends State<HomeScreen> {
                     width: 40,
                     height: 40,
                     decoration: BoxDecoration(
-                      color: _getCategoryColor(category).withOpacity(0.1),
+                      color: _getCategoryColor(category).withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Icon(
@@ -370,8 +385,8 @@ class HomeScreenState extends State<HomeScreen> {
                               _loadSubscriptions();
                             }
                           },
-                          onEdit: (billData) {
-                            _editBill(billData['originalIndex']);
+                          onEdit: (billData) async {
+                            await _editBill(billData['originalIndex']);
                           },
                           onShowDetails: (billData) {
                             // Show bill details if needed
@@ -410,11 +425,15 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _editBill(int index) {
+  Future<void> _editBill(int index) async {
     if (index < 0 || index >= _bills.length) return;
 
     final bill = _bills[index];
-    showAddBillBottomSheet(context, bill: bill, editIndex: index);
+
+    // Create a clean copy of the bill data for editing
+    final cleanBill = Map<String, dynamic>.from(bill);
+
+    await showAddBillBottomSheet(context, bill: cleanBill, editIndex: index);
   }
 
   Future<bool?> _showMarkAsPaidConfirmDialog(
@@ -524,33 +543,33 @@ class HomeScreenState extends State<HomeScreen> {
     Map<String, dynamic> bill,
     int index,
   ) {
-    final _formKey = GlobalKey<FormState>();
-    final _nameController = TextEditingController(text: bill['name'] ?? '');
-    final _amountController = TextEditingController(text: bill['amount'] ?? '');
-    final _dueDateController = TextEditingController(
+    final editFormKey = GlobalKey<FormState>();
+    final nameController = TextEditingController(text: bill['name'] ?? '');
+    final amountController = TextEditingController(text: bill['amount'] ?? '');
+    final dueDateController = TextEditingController(
       text: bill['dueDate'] ?? '',
     );
-    final _dueTimeController = TextEditingController(
+    final dueTimeController = TextEditingController(
       text: bill['dueTime'] ?? '',
     );
-    final _notesController = TextEditingController(text: bill['notes'] ?? '');
+    final notesController = TextEditingController(text: bill['notes'] ?? '');
 
-    DateTime? _selectedDate;
-    TimeOfDay? _selectedTime;
-    String _selectedFrequency = bill['frequency'] ?? 'Monthly';
-    String _selectedReminder = bill['reminder'] ?? 'Same day';
-    Category _selectedCategory = Category.defaultCategories[0];
+    DateTime? selectedDate;
+    TimeOfDay? selectedTime;
+    String selectedFrequency = bill['frequency'] ?? 'Monthly';
+    String selectedReminder = bill['reminder'] ?? 'Same day';
+    // Category selectedCategory = Category.defaultCategories[0]; // Unused variable
 
     // Parse the due date and time if they exist
     final parsedDate = _parseDueDate(bill);
     if (parsedDate != null) {
-      _selectedDate = parsedDate;
-      _selectedTime = TimeOfDay(
+      selectedDate = parsedDate;
+      selectedTime = TimeOfDay(
         hour: parsedDate.hour,
         minute: parsedDate.minute,
       );
-      _dueDateController.text = bill['dueDate'] ?? '';
-      _dueTimeController.text = bill['dueTime'] ?? '';
+      dueDateController.text = bill['dueDate'] ?? '';
+      dueTimeController.text = bill['dueTime'] ?? '';
     }
 
     showModalBottomSheet(
@@ -573,7 +592,7 @@ class HomeScreenState extends State<HomeScreen> {
           child: StatefulBuilder(
             builder: (BuildContext context, StateSetter setState) {
               return Form(
-                key: _formKey,
+                key: editFormKey,
                 child: SingleChildScrollView(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -584,7 +603,7 @@ class HomeScreenState extends State<HomeScreen> {
                             width: 32,
                             height: 32,
                             decoration: BoxDecoration(
-                              color: Colors.orange.withOpacity(0.1),
+                              color: Colors.orange.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Icon(
@@ -607,7 +626,7 @@ class HomeScreenState extends State<HomeScreen> {
                       ),
                       const SizedBox(height: 20),
                       TextFormField(
-                        controller: _nameController,
+                        controller: nameController,
                         style: const TextStyle(
                           color: Colors.black,
                           fontSize: 14,
@@ -625,7 +644,7 @@ class HomeScreenState extends State<HomeScreen> {
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                             borderSide: BorderSide(
-                              color: Colors.orange.withOpacity(0.6),
+                              color: Colors.orange.withValues(alpha: 0.6),
                               width: 1,
                             ),
                           ),
@@ -642,7 +661,7 @@ class HomeScreenState extends State<HomeScreen> {
                             margin: const EdgeInsets.all(8),
                             padding: const EdgeInsets.all(4),
                             decoration: BoxDecoration(
-                              color: Colors.blue.withOpacity(0.1),
+                              color: Colors.blue.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Icon(
@@ -665,7 +684,7 @@ class HomeScreenState extends State<HomeScreen> {
                       ),
                       const SizedBox(height: 14),
                       TextFormField(
-                        controller: _amountController,
+                        controller: amountController,
                         style: const TextStyle(
                           color: Colors.black,
                           fontSize: 14,
@@ -683,7 +702,7 @@ class HomeScreenState extends State<HomeScreen> {
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                             borderSide: BorderSide(
-                              color: Colors.orange.withOpacity(0.6),
+                              color: Colors.orange.withValues(alpha: 0.6),
                               width: 1,
                             ),
                           ),
@@ -700,7 +719,7 @@ class HomeScreenState extends State<HomeScreen> {
                             margin: const EdgeInsets.all(8),
                             padding: const EdgeInsets.all(4),
                             decoration: BoxDecoration(
-                              color: Colors.green.withOpacity(0.1),
+                              color: Colors.green.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Icon(
@@ -732,7 +751,7 @@ class HomeScreenState extends State<HomeScreen> {
                         children: [
                           Expanded(
                             child: TextFormField(
-                              controller: _dueDateController,
+                              controller: dueDateController,
                               style: const TextStyle(
                                 color: Colors.black,
                                 fontSize: 14,
@@ -742,7 +761,7 @@ class HomeScreenState extends State<HomeScreen> {
                                 final DateTime? picked = await showDatePicker(
                                   context: context,
                                   initialDate:
-                                      _selectedDate ??
+                                      selectedDate ??
                                       DateTime.now().add(
                                         const Duration(days: 1),
                                       ),
@@ -764,14 +783,14 @@ class HomeScreenState extends State<HomeScreen> {
                                 );
                                 if (picked != null) {
                                   setState(() {
-                                    _selectedDate = DateTime(
+                                    selectedDate = DateTime(
                                       picked.year,
                                       picked.month,
                                       picked.day,
-                                      _selectedTime?.hour ?? 0,
-                                      _selectedTime?.minute ?? 0,
+                                      selectedTime?.hour ?? 0,
+                                      selectedTime?.minute ?? 0,
                                     );
-                                    _dueDateController.text =
+                                    dueDateController.text =
                                         '${picked.day.toString().padLeft(2, '0')}/${picked.month.toString().padLeft(2, '0')}/${picked.year}';
                                   });
                                 }
@@ -789,7 +808,7 @@ class HomeScreenState extends State<HomeScreen> {
                                 enabledBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(8),
                                   borderSide: BorderSide(
-                                    color: Colors.orange.withOpacity(0.6),
+                                    color: Colors.orange.withValues(alpha: 0.6),
                                     width: 1,
                                   ),
                                 ),
@@ -806,7 +825,7 @@ class HomeScreenState extends State<HomeScreen> {
                                   margin: const EdgeInsets.all(8),
                                   padding: const EdgeInsets.all(4),
                                   decoration: BoxDecoration(
-                                    color: Colors.purple.withOpacity(0.1),
+                                    color: Colors.purple.withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(6),
                                   ),
                                   child: Icon(
@@ -836,7 +855,7 @@ class HomeScreenState extends State<HomeScreen> {
                           const SizedBox(width: 12),
                           Expanded(
                             child: TextFormField(
-                              controller: _dueTimeController,
+                              controller: dueTimeController,
                               style: const TextStyle(
                                 color: Colors.black,
                                 fontSize: 14,
@@ -847,7 +866,7 @@ class HomeScreenState extends State<HomeScreen> {
                                     await _getDefaultNotificationTime();
                                 final TimeOfDay? picked = await showTimePicker(
                                   context: context,
-                                  initialTime: _selectedTime ?? defaultTime,
+                                  initialTime: selectedTime ?? defaultTime,
                                   builder: (context, child) {
                                     return Theme(
                                       data: Theme.of(context).copyWith(
@@ -864,17 +883,17 @@ class HomeScreenState extends State<HomeScreen> {
                                 );
                                 if (picked != null) {
                                   setState(() {
-                                    _selectedTime = picked;
-                                    _dueTimeController.text = picked.format(
+                                    selectedTime = picked;
+                                    dueTimeController.text = picked.format(
                                       context,
                                     );
 
                                     // Update selectedDate with the new time
-                                    if (_selectedDate != null) {
-                                      _selectedDate = DateTime(
-                                        _selectedDate!.year,
-                                        _selectedDate!.month,
-                                        _selectedDate!.day,
+                                    if (selectedDate != null) {
+                                      selectedDate = DateTime(
+                                        selectedDate!.year,
+                                        selectedDate!.month,
+                                        selectedDate!.day,
                                         picked.hour,
                                         picked.minute,
                                       );
@@ -895,7 +914,7 @@ class HomeScreenState extends State<HomeScreen> {
                                 enabledBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(8),
                                   borderSide: BorderSide(
-                                    color: Colors.orange.withOpacity(0.6),
+                                    color: Colors.orange.withValues(alpha: 0.6),
                                     width: 1,
                                   ),
                                 ),
@@ -912,7 +931,7 @@ class HomeScreenState extends State<HomeScreen> {
                                   margin: const EdgeInsets.all(8),
                                   padding: const EdgeInsets.all(4),
                                   decoration: BoxDecoration(
-                                    color: Colors.orange.withOpacity(0.1),
+                                    color: Colors.orange.withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(6),
                                   ),
                                   child: Icon(
@@ -943,7 +962,7 @@ class HomeScreenState extends State<HomeScreen> {
                       ),
                       const SizedBox(height: 14),
                       TextFormField(
-                        controller: _notesController,
+                        controller: notesController,
                         style: const TextStyle(
                           color: Colors.black,
                           fontSize: 14,
@@ -962,7 +981,7 @@ class HomeScreenState extends State<HomeScreen> {
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                             borderSide: BorderSide(
-                              color: Colors.orange.withOpacity(0.6),
+                              color: Colors.orange.withValues(alpha: 0.6),
                               width: 1,
                             ),
                           ),
@@ -979,7 +998,7 @@ class HomeScreenState extends State<HomeScreen> {
                             margin: const EdgeInsets.all(8),
                             padding: const EdgeInsets.all(4),
                             decoration: BoxDecoration(
-                              color: Colors.teal.withOpacity(0.1),
+                              color: Colors.teal.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Icon(
@@ -1021,19 +1040,19 @@ class HomeScreenState extends State<HomeScreen> {
                           Expanded(
                             child: ElevatedButton(
                               onPressed: () async {
-                                if (_formKey.currentState!.validate()) {
+                                if (editFormKey.currentState!.validate()) {
                                   final updatedBill = {
-                                    'name': _nameController.text,
-                                    'amount': _amountController.text,
-                                    'dueDate': _dueDateController.text,
-                                    'dueTime': _dueTimeController.text,
-                                    'dueDateTime': _selectedDate
+                                    'name': nameController.text,
+                                    'amount': amountController.text,
+                                    'dueDate': dueDateController.text,
+                                    'dueTime': dueTimeController.text,
+                                    'dueDateTime': selectedDate
                                         ?.toIso8601String(),
-                                    'frequency': _selectedFrequency,
-                                    'reminder': _selectedReminder,
-                                    'notes': _notesController.text.isEmpty
+                                    'frequency': selectedFrequency,
+                                    'reminder': selectedReminder,
+                                    'notes': notesController.text.isEmpty
                                         ? null
-                                        : _notesController.text,
+                                        : notesController.text,
                                   };
 
                                   await _updateBill(index, updatedBill);
@@ -1082,6 +1101,7 @@ class HomeScreenState extends State<HomeScreen> {
 
     try {
       if (_isOnline && billId != null) {
+        debugPrint('🌐 Updating bill in Firebase with ID: $billId');
         // Try to update in Firebase first
         await _subscriptionService.updateSubscription(billId, updatedBill);
 
@@ -1108,6 +1128,7 @@ class HomeScreenState extends State<HomeScreen> {
         }
       } else {
         // Offline or no ID: Update locally only
+        debugPrint('📱 Updating bill locally (offline or no ID)');
         if (mounted) {
           setState(() {
             _bills[index] = Map.from(originalBill)..addAll(updatedBill);
@@ -1132,20 +1153,21 @@ class HomeScreenState extends State<HomeScreen> {
         }
       }
     } catch (e) {
+      debugPrint('❌ Error updating bill: $e');
       // Re-check connectivity to make sure it's actually offline
       await _checkConnectivity();
 
-      if (!_isOnline) {
-        // Only show offline message if actually offline
-        if (mounted) {
-          setState(() {
-            _bills[index] = Map.from(originalBill)..addAll(updatedBill);
-            _checkForOverdueBills(); // Immediate check for overdue status
-          });
+      // Even if Firebase fails, update locally
+      if (mounted) {
+        setState(() {
+          _bills[index] = Map.from(originalBill)..addAll(updatedBill);
+          _checkForOverdueBills(); // Immediate check for overdue status
+        });
 
-          // Update reminders locally
-          await _updateBillReminders(_bills[index]);
+        // Update reminders locally
+        await _updateBillReminders(_bills[index]);
 
+        if (!_isOnline) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
@@ -1158,14 +1180,12 @@ class HomeScreenState extends State<HomeScreen> {
               ),
             ),
           );
-        }
-      } else {
-        // If online but Firebase failed, show error message
-        if (mounted) {
+        } else {
+          // If online but Firebase failed, still show success for local update
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Failed to update bill. Please try again.'),
-              backgroundColor: Colors.red,
+              content: Text('${updatedBill['name']} updated successfully!'),
+              backgroundColor: Colors.green,
               behavior: SnackBarBehavior.floating,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),
@@ -1477,7 +1497,7 @@ class HomeScreenState extends State<HomeScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // Top row: icon + title/subtitle + profile
+                      // Top row: icon + title/subtitle + profile + sync status
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -1508,31 +1528,61 @@ class HomeScreenState extends State<HomeScreen> {
                             ],
                           ),
 
-                          // Profile (kept inside the same top row)
-                          GestureDetector(
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const ProfileScreen(),
+                          // Sync status and profile row
+                          Row(
+                            children: [
+                              // Sync status indicator
+                              StreamBuilder<bool>(
+                                stream: _subscriptionService.connectivityStream(),
+                                builder: (context, snapshot) {
+                                  final isOnline = snapshot.data ?? false;
+                                  return Row(
+                                    children: [
+                                      Icon(
+                                        isOnline ? Icons.cloud_done : Icons.cloud_off,
+                                        color: isOnline ? Colors.green : Colors.grey,
+                                        size: 18,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        _subscriptionService.getSyncStatus(),
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          color: Colors.grey[600],
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                },
+                              ),
+                              const SizedBox(width: 16),
+                              // Profile (kept inside the same top row)
+                              GestureDetector(
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => const ProfileScreen(),
+                                    ),
+                                  );
+                                },
+                                child: Column(
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 18,
+                                      backgroundColor: Colors.indigoAccent
+                                          .withValues(alpha: 0.15), // light bg
+                                      child: Icon(
+                                        Icons.person, // 🔄 subscription icon
+                                        color: Colors.indigoAccent, // main color
+                                        size: 22,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                  ],
                                 ),
-                              );
-                            },
-                            child: Column(
-                              children: [
-                                CircleAvatar(
-                                  radius: 18,
-                                  backgroundColor: Colors.indigoAccent
-                                      .withOpacity(0.15), // light bg
-                                  child: Icon(
-                                    Icons.person, // 🔄 subscription icon
-                                    color: Colors.indigoAccent, // main color
-                                    size: 22,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                              ],
-                            ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -1671,11 +1721,25 @@ class HomeScreenState extends State<HomeScreen> {
                           ],
                         ),
                       ),
-                      const SizedBox(height: 20),
-                      // Category Content
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: _buildCategoryContent(),
+                      const SizedBox(height: 24),
+
+                      // Status Tabs Bar
+                      Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 16),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[100],
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Row(
+                          children: _buildStatusTabsList(),
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // Filtered Bills Content
+                      Expanded(
+                        child: _buildFilteredBillsContent(),
                       ),
                     ],
                   ),
@@ -1688,6 +1752,61 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // Status Tabs and Content Methods
+  List<Widget> _buildStatusTabsList() {
+    List<Widget> tabs = [];
+
+    final statusOptions = [
+      {'id': 'upcoming', 'title': 'Upcoming', 'icon': Icons.calendar_today},
+      {'id': 'overdue', 'title': 'Overdue', 'icon': Icons.warning},
+      {'id': 'paid', 'title': 'Paid', 'icon': Icons.check_circle},
+    ];
+
+    for (var status in statusOptions) {
+      tabs.add(
+        Expanded(
+          child: GestureDetector(
+            onTap: () {
+              setState(() {
+                selectedStatus = status['id'] as String;
+              });
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              decoration: BoxDecoration(
+                color: selectedStatus == status['id']
+                    ? HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor()
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    status['icon'] as IconData,
+                    color: selectedStatus == status['id'] ? Colors.white : Colors.grey[600],
+                    size: 20,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    status['title'] as String,
+                    style: TextStyle(
+                      color: selectedStatus == status['id'] ? Colors.white : Colors.grey[600],
+                      fontWeight: selectedStatus == status['id'] ? FontWeight.w600 : FontWeight.w500,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return tabs;
+  }
+
   // Category Tabs and Content Methods
   List<Widget> _buildCategoryTabsList() {
     List<Widget> tabs = [];
@@ -1698,10 +1817,10 @@ class HomeScreenState extends State<HomeScreen> {
         padding: const EdgeInsets.only(right: 8),
         child: _buildCategoryTab(
           title: 'All',
-          isSelected: _selectedCategory == 'all',
+          isSelected: selectedCategory == 'all',
           onTap: () {
             setState(() {
-              _selectedCategory = 'all';
+              selectedCategory = 'all';
             });
           },
         ),
@@ -1715,10 +1834,10 @@ class HomeScreenState extends State<HomeScreen> {
           padding: const EdgeInsets.only(right: 8),
           child: _buildCategoryTab(
             title: category.name,
-            isSelected: _selectedCategory == category.id,
+            isSelected: selectedCategory == category.id,
             onTap: () {
               setState(() {
-                _selectedCategory = category.id;
+                selectedCategory = category.id;
               });
             },
           ),
@@ -1750,7 +1869,7 @@ class HomeScreenState extends State<HomeScreen> {
           boxShadow: isSelected
               ? [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.2),
+                    color: Colors.black.withValues(alpha: 0.2),
                     blurRadius: 4,
                     offset: const Offset(0, 2),
                   ),
@@ -1770,11 +1889,353 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildCategoryContent() {
-    if (_selectedCategory == 'all') {
-      return _buildAllCategoriesContent();
-    } else {
-      return _buildSingleCategoryContent(_selectedCategory);
+    return Column(
+      children: [
+        // Category Selector
+        Container(
+          height: 40,
+          margin: const EdgeInsets.only(bottom: 16),
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            itemCount: _buildCategoryTabsList().length,
+            itemBuilder: (context, index) {
+              return _buildCategoryTabsList()[index];
+            },
+          ),
+        ),
+
+        // Filtered Bills Content
+        Expanded(
+          child: _buildFilteredBillsContent(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFilteredBillsContent() {
+    // Filter bills based on selected status and category
+    List<Map<String, dynamic>> filteredBills = [];
+
+    final now = DateTime.now();
+
+    debugPrint('🔍 Filtering bills - Status: $selectedStatus, Category: $selectedCategory, Total bills: ${_bills.length}');
+
+    for (var bill in _bills) {
+      try {
+        final dueDate = _parseDueDate(bill);
+
+        // Quick status check first (more efficient)
+        final billStatus = bill['status']?.toString() ?? '';
+        bool matchesStatus = false;
+
+        switch (selectedStatus) {
+          case 'upcoming':
+            matchesStatus = billStatus != 'paid' && dueDate != null &&
+                           dueDate.isAfter(now) &&
+                           dueDate.isBefore(now.add(const Duration(days: 30)));
+            break;
+          case 'overdue':
+            matchesStatus = billStatus != 'paid' && dueDate != null && dueDate.isBefore(now);
+            break;
+          case 'paid':
+            matchesStatus = billStatus == 'paid';
+            break;
+        }
+
+        // Quick category check (more efficient)
+        final billCategory = bill['category']?.toString();
+        final matchesCategory = selectedCategory == 'all' || billCategory == selectedCategory;
+
+        // Only add bill if both filters match
+        if (matchesStatus && matchesCategory) {
+          filteredBills.add(bill);
+        }
+      } catch (e) {
+        debugPrint('Error filtering bill: $e');
+      }
     }
+
+    
+    // Sort by due date
+    filteredBills.sort((a, b) {
+      final aDate = _parseDueDate(a);
+      final bDate = _parseDueDate(b);
+      if (aDate == null && bDate == null) return 0;
+      if (aDate == null) return 1;
+      if (bDate == null) return -1;
+      return aDate.compareTo(bDate);
+    });
+
+    if (filteredBills.isEmpty) {
+      // Check if there are any bills in this category at all (regardless of status)
+      final hasBillsInCategory = selectedCategory == 'all'
+          ? _bills.isNotEmpty
+          : _bills.any((bill) => bill['category']?.toString() == selectedCategory);
+
+      
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.receipt_long_outlined,
+              size: 64,
+              color: Colors.grey[400],
+            ),
+            const SizedBox(height: 16),
+            Text(
+              hasBillsInCategory
+                  ? 'No ${selectedStatus} bills${selectedCategory != 'all' ? ' in ${Category.findById(selectedCategory)?.name ?? selectedCategory}' : ''}'
+                  : 'No bills in ${selectedCategory != 'all' ? Category.findById(selectedCategory)?.name ?? selectedCategory : 'any category'}',
+              style: TextStyle(
+                fontSize: 16,
+                color: Colors.grey[600],
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              hasBillsInCategory
+                  ? 'Try selecting a different status (Upcoming, Paid, Overdue)'
+                  : 'Add a new bill to get started',
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey[500],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.only(bottom: 16),
+      itemCount: filteredBills.length,
+      itemBuilder: (context, index) {
+        final bill = filteredBills[index];
+        // Find the original index in _bills for proper editing/deletion
+        final originalIndex = _bills.indexWhere((b) =>
+          b['id'] == bill['id'] ||
+          b['firebaseId'] == bill['firebaseId'] ||
+          b['localId'] == bill['localId']
+        );
+        return _buildBillCard(bill, originalIndex);
+      },
+    );
+  }
+
+  Widget _buildBillCard(Map<String, dynamic> bill, int index) {
+    final dueDate = _parseDueDate(bill);
+    final now = DateTime.now();
+    final isOverdue = dueDate != null && dueDate.isBefore(now) && bill['status'] != 'paid';
+    final isPaid = bill['status'] == 'paid';
+    final category = bill['category'] != null ? Category.findById(bill['category'].toString()) : null;
+
+    // Determine status color and text
+    Color statusColor;
+    String statusText;
+    IconData statusIcon;
+
+    if (isPaid) {
+      statusColor = Colors.green;
+      statusText = 'Paid';
+      statusIcon = Icons.check_circle;
+    } else if (isOverdue) {
+      statusColor = Colors.red;
+      statusText = 'Overdue';
+      statusIcon = Icons.warning;
+    } else {
+      statusColor = Colors.orange;
+      statusText = 'Upcoming';
+      statusIcon = Icons.calendar_today;
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Card(
+        elevation: 2,
+        shadowColor: Colors.black.withValues(alpha: 0.1),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(
+            color: isOverdue ? Colors.red.withValues(alpha: 0.3) : Colors.transparent,
+            width: isOverdue ? 1 : 0,
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header row with title and status
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        // Category icon
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: category?.backgroundColor ?? Colors.grey[200],
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(
+                            category?.icon ?? Icons.receipt,
+                            color: category?.color ?? Colors.grey[700],
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        // Bill name and amount
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                bill['name']?.toString() ?? 'Unnamed Bill',
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.black87,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '\$${bill['amount']?.toString() ?? '0.00'}',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                  color: Colors.grey[700],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Status indicator
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: statusColor.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          statusIcon,
+                          color: statusColor,
+                          size: 14,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          statusText,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: statusColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+
+              // Divider
+              const SizedBox(height: 12),
+              const Divider(height: 1),
+
+              // Due date and actions row
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  // Due date
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.event,
+                        size: 16,
+                        color: Colors.grey[600],
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        dueDate != null
+                            ? '${dueDate.day.toString().padLeft(2, '0')}/${dueDate.month.toString().padLeft(2, '0')}/${dueDate.year}'
+                            : 'No due date',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey[700],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  // Action buttons
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (!isPaid)
+                        TextButton.icon(
+                          onPressed: () async {
+                            bool? confirm = await _showMarkAsPaidConfirmDialog(
+                              context,
+                              bill['name']?.toString() ?? 'this bill',
+                            );
+                            if (confirm == true) {
+                              _markAsPaid(index);
+                              _loadSubscriptions();
+                            }
+                          },
+                          icon: const Icon(Icons.check, size: 16),
+                          label: const Text('Pay'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.green,
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          ),
+                        ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        onPressed: () async {
+                          await _editBill(index);
+                        },
+                        icon: const Icon(Icons.edit, size: 16),
+                        style: IconButton.styleFrom(
+                          foregroundColor: Colors.blue,
+                          padding: const EdgeInsets.all(4),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () async {
+                          bool? confirm = await _showDeleteConfirmDialog(context);
+                          if (confirm == true) {
+                            await _deleteSubscription(index);
+                            _loadSubscriptions();
+                          }
+                        },
+                        icon: const Icon(Icons.delete, size: 16),
+                        style: IconButton.styleFrom(
+                          foregroundColor: Colors.red,
+                          padding: const EdgeInsets.all(4),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildAllCategoriesContent() {
@@ -1920,8 +2381,8 @@ class HomeScreenState extends State<HomeScreen> {
                   _loadSubscriptions();
                 }
               },
-              onEdit: (billData) {
-                _editBill(billData['originalIndex']);
+              onEdit: (billData) async {
+                await _editBill(billData['originalIndex']);
               },
               onShowDetails: (billData) {
                 // Show bill details if needed
@@ -2398,33 +2859,51 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void showAddBillBottomSheet(BuildContext context, {Map<String, dynamic>? bill, int? editIndex}) {
-    final _formKey = GlobalKey<FormState>();
-    final _nameController = TextEditingController(text: bill?['name'] ?? '');
-    final _amountController = TextEditingController(text: bill?['amount']?.toString() ?? '');
-    final _dueDateController = TextEditingController(text: bill?['dueDate'] ?? '');
-    final _dueTimeController = TextEditingController(text: bill?['dueTime'] ?? '');
-    final _notesController = TextEditingController(text: bill?['notes'] ?? '');
-    final _reminderTimeController = TextEditingController();
-    DateTime? _selectedDate;
-    TimeOfDay? _selectedTime;  // This is the DUE time (when bill expires)
-    TimeOfDay? _selectedReminderTime;  // This is the REMINDER time (when notification is sent)
-    String _selectedFrequency = bill?['frequency'] ?? 'Monthly';
-    String _selectedReminder = bill?['reminder'] ?? 'Same day';
-    Category _selectedCategory = Category.defaultCategories[0];
-
+  Future<void> showAddBillBottomSheet(BuildContext context, {Map<String, dynamic>? bill, int? editIndex}) async {
     final bool isEditMode = bill != null && editIndex != null;
+    debugPrint('📝 Edit mode: $isEditMode, bill: ${bill?['name']}, editIndex: $editIndex');
+
+    // Declare variables outside StatefulBuilder to maintain state
+    final formKey = GlobalKey<FormState>();
+    late final TextEditingController nameController;
+    late final TextEditingController amountController;
+    late final TextEditingController dueDateController;
+    late final TextEditingController dueTimeController;
+    late final TextEditingController notesController;
+    late final TextEditingController reminderTimeController;
+    late DateTime? selectedDate;
+    late TimeOfDay? selectedTime;
+    late TimeOfDay? selectedReminderTime;
+    late String selectedFrequency;
+    late String selectedReminder;
+    late Category selectedCategory;
+    final int? currentEditIndex = editIndex;
+
+    // Initialize variables
+    nameController = TextEditingController(text: bill?['name']?.toString() ?? '');
+    amountController = TextEditingController(text: bill?['amount']?.toString() ?? '');
+    dueDateController = TextEditingController(text: bill?['dueDate']?.toString() ?? '');
+    dueTimeController = TextEditingController(text: bill?['dueTime']?.toString() ?? '');
+    notesController = TextEditingController(text: bill?['notes']?.toString() ?? '');
+    reminderTimeController = TextEditingController();
+    selectedDate = null;
+    selectedTime = null;
+    selectedReminderTime = null;
+    selectedFrequency = bill?['frequency']?.toString() ?? 'Monthly';
+    selectedReminder = bill?['reminder']?.toString() ?? 'Same day';
+    selectedCategory = Category.defaultCategories[0];
 
     // Parse the due date and time if they exist (for edit mode)
     if (isEditMode) {
+      debugPrint('📝 Parsing bill data for editing...');
       final parsedDate = _parseDueDate(bill!);
       if (parsedDate != null) {
-        _selectedDate = parsedDate;
-        _selectedTime = TimeOfDay(hour: parsedDate.hour, minute: parsedDate.minute);
+        selectedDate = parsedDate;
+        selectedTime = TimeOfDay(hour: parsedDate.hour, minute: parsedDate.minute);
 
         // Format date and time for display
-        _dueDateController.text = '${parsedDate.day.toString().padLeft(2, '0')}/${parsedDate.month.toString().padLeft(2, '0')}/${parsedDate.year}';
-        _dueTimeController.text = _selectedTime.format(context);
+        dueDateController.text = '${parsedDate.day.toString().padLeft(2, '0')}/${parsedDate.month.toString().padLeft(2, '0')}/${parsedDate.year}';
+        dueTimeController.text = selectedTime?.format(context) ?? '';
       }
 
       // Parse the reminder time if it exists (SEPARATE from due time)
@@ -2434,59 +2913,64 @@ class HomeScreenState extends State<HomeScreen> {
           if (reminderTimeStr is String) {
             final parts = reminderTimeStr.split(':');
             if (parts.length == 2) {
-              _selectedReminderTime = TimeOfDay(
+              selectedReminderTime = TimeOfDay(
                 hour: int.parse(parts[0]),
                 minute: int.parse(parts[1]),
               );
             }
           } else if (reminderTimeStr is Map) {
-            _selectedReminderTime = TimeOfDay(
+            selectedReminderTime = TimeOfDay(
               hour: reminderTimeStr['hour'] ?? 9,
               minute: reminderTimeStr['minute'] ?? 0,
             );
           }
         } catch (e) {
           // If parsing fails, fall back to default
-          _selectedReminderTime = await _getDefaultNotificationTime();
+          selectedReminderTime = const TimeOfDay(hour: 9, minute: 0);
         }
       } else {
         // If no specific reminder time, get default from settings
-        _selectedReminderTime = await _getDefaultNotificationTime();
+        selectedReminderTime = const TimeOfDay(hour: 9, minute: 0);
       }
-    }
 
-    // Set category if exists
-    if (bill?['category'] != null) {
-        final category = Category.findById(bill['category']);
+      // Set category if exists
+      if (bill?['category'] != null) {
+        debugPrint('📝 Setting category from bill: ${bill!['category']}');
+        final category = Category.findById(bill!['category']);
         if (category != null) {
-          _selectedCategory = category;
+          selectedCategory = category;
+          debugPrint('✅ Category set to: ${category.name}');
+        } else {
+          debugPrint('⚠️ Category not found: ${bill!['category']}');
         }
       }
+
+      // Set frequency and reminder preferences from bill
+      selectedFrequency = bill?['frequency'] ?? 'Monthly';
+      selectedReminder = bill?['reminder'] ?? 'Same day';
     }
-    showModalBottomSheet(
+
+    await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        height: MediaQuery.of(context).size.height * 0.5,
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        child: Padding(
-          padding: EdgeInsets.only(
-            left: 20.0,
-            right: 20.0,
-            top: 20.0,
-            bottom: MediaQuery.of(context).viewInsets.bottom + 20.0,
-          ),
-          child: StatefulBuilder(
-            builder: (BuildContext context, StateSetter setState) {
-              // Make these variables accessible inside the builder
-              final bool isEditMode = bill != null && editIndex != null;
-              final int? currentEditIndex = editIndex;
-              return Form(
-                key: _formKey,
+      builder: (context) => StatefulBuilder(
+        builder: (BuildContext context, StateSetter setState) {
+          return Container(
+            height: MediaQuery.of(context).size.height * 0.5,
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            child: Padding(
+              padding: EdgeInsets.only(
+                left: 20.0,
+                right: 20.0,
+                top: 20.0,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 20.0,
+              ),
+              child: Form(
+                key: formKey,
                 child: SingleChildScrollView(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -2497,7 +2981,7 @@ class HomeScreenState extends State<HomeScreen> {
                             width: 32,
                             height: 32,
                             decoration: BoxDecoration(
-                              color: (isEditMode ? Colors.orange[700]! : kPrimaryColor).withOpacity(0.1),
+                              color: (isEditMode ? Colors.orange[700]! : kPrimaryColor).withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Icon(
@@ -2524,7 +3008,7 @@ class HomeScreenState extends State<HomeScreen> {
                         onTap: () {
                           _showCategoryBottomSheet(context, (category) {
                             setState(() {
-                              _selectedCategory = category;
+                              selectedCategory = category;
                             });
                           });
                         },
@@ -2547,12 +3031,12 @@ class HomeScreenState extends State<HomeScreen> {
                                   width: 28,
                                   height: 28,
                                   decoration: BoxDecoration(
-                                    color: _selectedCategory.backgroundColor,
+                                    color: selectedCategory.backgroundColor,
                                     borderRadius: BorderRadius.circular(6),
                                   ),
                                   child: Icon(
-                                    _selectedCategory.icon,
-                                    color: _selectedCategory.color,
+                                    selectedCategory.icon,
+                                    color: selectedCategory.color,
                                     size: 16,
                                   ),
                                 ),
@@ -2572,7 +3056,7 @@ class HomeScreenState extends State<HomeScreen> {
                                       ),
                                       const SizedBox(height: 2),
                                       Text(
-                                        _selectedCategory.name,
+                                        selectedCategory.name,
                                         style: const TextStyle(
                                           color: Colors.black,
                                           fontSize: 14,
@@ -2594,7 +3078,7 @@ class HomeScreenState extends State<HomeScreen> {
                       ),
                       const SizedBox(height: 14),
                       TextFormField(
-                        controller: _nameController,
+                        controller: nameController,
                         style: const TextStyle(
                           color: Colors.black,
                           fontSize: 14,
@@ -2629,7 +3113,7 @@ class HomeScreenState extends State<HomeScreen> {
                             margin: const EdgeInsets.all(8),
                             padding: const EdgeInsets.all(4),
                             decoration: BoxDecoration(
-                              color: Colors.blue.withOpacity(0.1),
+                              color: Colors.blue.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Icon(
@@ -2660,7 +3144,7 @@ class HomeScreenState extends State<HomeScreen> {
                       ),
                       const SizedBox(height: 14),
                       TextFormField(
-                        controller: _amountController,
+                        controller: amountController,
                         style: const TextStyle(
                           color: Colors.black,
                           fontSize: 14,
@@ -2695,7 +3179,7 @@ class HomeScreenState extends State<HomeScreen> {
                             margin: const EdgeInsets.all(8),
                             padding: const EdgeInsets.all(4),
                             decoration: BoxDecoration(
-                              color: Colors.green.withOpacity(0.1),
+                              color: Colors.green.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Icon(
@@ -2735,7 +3219,7 @@ class HomeScreenState extends State<HomeScreen> {
                         children: [
                           Expanded(
                             child: TextFormField(
-                              controller: _dueDateController,
+                              controller: dueDateController,
                               style: const TextStyle(
                                 color: Colors.black,
                                 fontSize: 14,
@@ -2745,7 +3229,7 @@ class HomeScreenState extends State<HomeScreen> {
                                 final DateTime? picked = await showDatePicker(
                                   context: context,
                                   initialDate:
-                                      _selectedDate ??
+                                      selectedDate ??
                                       DateTime.now().add(
                                         const Duration(days: 1),
                                       ),
@@ -2767,14 +3251,14 @@ class HomeScreenState extends State<HomeScreen> {
                                 );
                                 if (picked != null) {
                                   setState(() {
-                                    _selectedDate = DateTime(
+                                    selectedDate = DateTime(
                                       picked.year,
                                       picked.month,
                                       picked.day,
-                                      _selectedTime?.hour ?? 0,
-                                      _selectedTime?.minute ?? 0,
+                                      selectedTime?.hour ?? 0,
+                                      selectedTime?.minute ?? 0,
                                     );
-                                    _dueDateController.text =
+                                    dueDateController.text =
                                         '${picked.day.toString().padLeft(2, '0')}/${picked.month.toString().padLeft(2, '0')}/${picked.year}';
                                   });
                                 }
@@ -2809,7 +3293,7 @@ class HomeScreenState extends State<HomeScreen> {
                                   margin: const EdgeInsets.all(8),
                                   padding: const EdgeInsets.all(4),
                                   decoration: BoxDecoration(
-                                    color: Colors.purple.withOpacity(0.1),
+                                    color: Colors.purple.withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(6),
                                   ),
                                   child: Icon(
@@ -2847,7 +3331,7 @@ class HomeScreenState extends State<HomeScreen> {
                           const SizedBox(width: 12),
                           Expanded(
                             child: TextFormField(
-                              controller: _dueTimeController,
+                              controller: dueTimeController,
                               style: const TextStyle(
                                 color: Colors.black,
                                 fontSize: 14,
@@ -2857,7 +3341,7 @@ class HomeScreenState extends State<HomeScreen> {
                                 final TimeOfDay? picked = await showTimePicker(
                                   context: context,
                                   initialTime:
-                                      _selectedTime ??
+                                      selectedTime ??
                                       const TimeOfDay(hour: 9, minute: 0),
                                   builder: (context, child) {
                                     return Theme(
@@ -2875,17 +3359,17 @@ class HomeScreenState extends State<HomeScreen> {
                                 );
                                 if (picked != null) {
                                   setState(() {
-                                    _selectedTime = picked;
-                                    _dueTimeController.text = picked.format(
+                                    selectedTime = picked;
+                                    dueTimeController.text = picked.format(
                                       context,
                                     );
 
                                     // Update selectedDate with the new time
-                                    if (_selectedDate != null) {
-                                      _selectedDate = DateTime(
-                                        _selectedDate!.year,
-                                        _selectedDate!.month,
-                                        _selectedDate!.day,
+                                    if (selectedDate != null) {
+                                      selectedDate = DateTime(
+                                        selectedDate!.year,
+                                        selectedDate!.month,
+                                        selectedDate!.day,
                                         picked.hour,
                                         picked.minute,
                                       );
@@ -2923,7 +3407,7 @@ class HomeScreenState extends State<HomeScreen> {
                                   margin: const EdgeInsets.all(8),
                                   padding: const EdgeInsets.all(4),
                                   decoration: BoxDecoration(
-                                    color: Colors.orange.withOpacity(0.1),
+                                    color: Colors.orange.withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(6),
                                   ),
                                   child: Icon(
@@ -2965,7 +3449,7 @@ class HomeScreenState extends State<HomeScreen> {
                         onTap: () {
                           _showFrequencyBottomSheet(context, (frequency) {
                             setState(() {
-                              _selectedFrequency = frequency;
+                              selectedFrequency = frequency;
                             });
                           });
                         },
@@ -2987,7 +3471,7 @@ class HomeScreenState extends State<HomeScreen> {
                                 Container(
                                   padding: const EdgeInsets.all(4),
                                   decoration: BoxDecoration(
-                                    color: Colors.orange.withOpacity(0.1),
+                                    color: Colors.orange.withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(6),
                                   ),
                                   child: Icon(
@@ -3012,7 +3496,7 @@ class HomeScreenState extends State<HomeScreen> {
                                       ),
                                       const SizedBox(height: 2),
                                       Text(
-                                        _selectedFrequency,
+                                        selectedFrequency,
                                         style: const TextStyle(
                                           color: Colors.black,
                                           fontSize: 14,
@@ -3037,9 +3521,9 @@ class HomeScreenState extends State<HomeScreen> {
                         onTap: () {
                           _showReminderBottomSheet(context, (reminder) {
                             setState(() {
-                              _selectedReminder = reminder;
+                              selectedReminder = reminder;
                             });
-                          }, _selectedDate);
+                          }, selectedDate);
                         },
                         child: Container(
                           decoration: BoxDecoration(
@@ -3059,7 +3543,7 @@ class HomeScreenState extends State<HomeScreen> {
                                 Container(
                                   padding: const EdgeInsets.all(4),
                                   decoration: BoxDecoration(
-                                    color: Colors.red.withOpacity(0.1),
+                                    color: Colors.red.withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(6),
                                   ),
                                   child: Icon(
@@ -3084,7 +3568,7 @@ class HomeScreenState extends State<HomeScreen> {
                                       ),
                                       const SizedBox(height: 2),
                                       Text(
-                                        _selectedReminder,
+                                        selectedReminder,
                                         style: const TextStyle(
                                           color: Colors.black,
                                           fontSize: 14,
@@ -3107,20 +3591,20 @@ class HomeScreenState extends State<HomeScreen> {
                       const SizedBox(height: 14),
                       // Reminder Time Field
                       GestureDetector(
-                        onTap: _selectedReminder == 'No reminder'
+                        onTap: selectedReminder == 'No reminder'
                             ? null
                             : () async {
                                 final defaultTime =
                                     await _getDefaultNotificationTime();
                                 final TimeOfDay? picked = await showTimePicker(
                                   context: context,
-                                  initialTime: _selectedReminderTime ?? defaultTime,
+                                  initialTime: selectedReminderTime ?? defaultTime,
                                 );
                                 if (picked != null) {
                                   setState(() {
-                                    _selectedReminderTime = picked;
-                                    _reminderTimeController.text =
-                                        _selectedReminderTime!.format(context);
+                                    selectedReminderTime = picked;
+                                    reminderTimeController.text =
+                                        selectedReminderTime!.format(context);
 
                                     // Don't update user's default notification preference
                                     // when editing individual bill reminder time
@@ -3130,13 +3614,13 @@ class HomeScreenState extends State<HomeScreen> {
                         child: Container(
                           decoration: BoxDecoration(
                             border: Border.all(
-                              color: _selectedReminder == 'No reminder'
+                              color: selectedReminder == 'No reminder'
                                   ? Colors.grey.withValues(alpha: 0.3)
                                   : kPrimaryColor.withValues(alpha: 0.6),
                               width: 1,
                             ),
                             borderRadius: BorderRadius.circular(8),
-                            color: _selectedReminder == 'No reminder'
+                            color: selectedReminder == 'No reminder'
                                 ? Colors.grey[100]
                                 : Colors.grey[50],
                           ),
@@ -3151,7 +3635,7 @@ class HomeScreenState extends State<HomeScreen> {
                                   margin: const EdgeInsets.only(right: 8),
                                   padding: const EdgeInsets.all(4),
                                   decoration: BoxDecoration(
-                                    color: Colors.orange.withOpacity(0.1),
+                                    color: Colors.orange.withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(6),
                                   ),
                                   child: Icon(
@@ -3169,7 +3653,7 @@ class HomeScreenState extends State<HomeScreen> {
                                         'Reminder Time',
                                         style: TextStyle(
                                           color:
-                                              _selectedReminder == 'No reminder'
+                                              selectedReminder == 'No reminder'
                                               ? Colors.grey[400]
                                               : Colors.grey[600],
                                           fontSize: 11,
@@ -3178,15 +3662,15 @@ class HomeScreenState extends State<HomeScreen> {
                                       ),
                                       const SizedBox(height: 2),
                                       Text(
-                                        _selectedReminder == 'No reminder'
+                                        selectedReminder == 'No reminder'
                                             ? 'No reminder set'
-                                            : (_selectedReminderTime?.format(context) ??
+                                            : (selectedReminderTime?.format(context) ??
                                                   'Select reminder time'),
                                         style: TextStyle(
                                           color:
-                                              _selectedReminder == 'No reminder'
+                                              selectedReminder == 'No reminder'
                                               ? Colors.grey[400]
-                                              : (_selectedReminderTime != null
+                                              : (selectedReminderTime != null
                                                     ? Colors.black
                                                     : Colors.grey[400]),
                                           fontSize: 14,
@@ -3198,7 +3682,7 @@ class HomeScreenState extends State<HomeScreen> {
                                 ),
                                 Icon(
                                   Icons.access_time,
-                                  color: _selectedReminder == 'No reminder'
+                                  color: selectedReminder == 'No reminder'
                                       ? Colors.grey[400]
                                       : kPrimaryColor,
                                   size: 18,
@@ -3210,7 +3694,7 @@ class HomeScreenState extends State<HomeScreen> {
                       ),
                       const SizedBox(height: 14),
                       TextFormField(
-                        controller: _notesController,
+                        controller: notesController,
                         style: const TextStyle(
                           color: Colors.black,
                           fontSize: 14,
@@ -3246,7 +3730,7 @@ class HomeScreenState extends State<HomeScreen> {
                             margin: const EdgeInsets.all(8),
                             padding: const EdgeInsets.all(4),
                             decoration: BoxDecoration(
-                              color: Colors.teal.withOpacity(0.1),
+                              color: Colors.teal.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Icon(
@@ -3296,39 +3780,39 @@ class HomeScreenState extends State<HomeScreen> {
                           Expanded(
                             child: ElevatedButton(
                               onPressed: () async {
-                                if (_formKey.currentState!.validate()) {
+                                if (formKey.currentState!.validate()) {
                                   // Ensure we have a time set (default to user's preferred time if not selected)
-                                  if (_selectedTime == null) {
-                                    _selectedTime =
+                                  if (selectedTime == null) {
+                                    selectedTime =
                                         await _getDefaultNotificationTime();
-                                    _dueTimeController.text = _selectedTime!
+                                    dueTimeController.text = selectedTime!
                                         .format(context);
 
                                     // Update selectedDate with default time
-                                    if (_selectedDate != null) {
-                                      _selectedDate = DateTime(
-                                        _selectedDate!.year,
-                                        _selectedDate!.month,
-                                        _selectedDate!.day,
-                                        _selectedTime!.hour,
-                                        _selectedTime!.minute,
+                                    if (selectedDate != null) {
+                                      selectedDate = DateTime(
+                                        selectedDate!.year,
+                                        selectedDate!.month,
+                                        selectedDate!.day,
+                                        selectedTime!.hour,
+                                        selectedTime!.minute,
                                       );
                                     }
                                   }
 
                                   // Create full due date string with time
-                                  String fullDueDate = _dueDateController.text;
-                                  if (_selectedTime != null) {
+                                  String fullDueDate = dueDateController.text;
+                                  if (selectedTime != null) {
                                     fullDueDate +=
-                                        ' ${_selectedTime!.format(context)}';
+                                        ' ${selectedTime!.format(context)}';
                                   }
 
                                   // Schedule notification if reminder time is selected
-                                  if (_selectedReminderTime != null && _selectedReminder != 'No reminder') {
+                                  if (selectedReminderTime != null && selectedReminder != 'No reminder') {
                                     // Calculate the actual reminder date based on the reminder preference
                                     DateTime reminderDate;
-                                    if (_selectedDate != null) {
-                                      reminderDate = _calculateReminderDate(_selectedDate!, _selectedReminder);
+                                    if (selectedDate != null) {
+                                      reminderDate = _calculateReminderDate(selectedDate!, selectedReminder);
                                     } else {
                                       reminderDate = DateTime.now();
                                     }
@@ -3338,8 +3822,8 @@ class HomeScreenState extends State<HomeScreen> {
                                       reminderDate.year,
                                       reminderDate.month,
                                       reminderDate.day,
-                                      _selectedReminderTime!.hour,
-                                      _selectedReminderTime!.minute,
+                                      selectedReminderTime!.hour,
+                                      selectedReminderTime!.minute,
                                     );
 
                                     // Only schedule if the reminder time is in the future
@@ -3352,37 +3836,37 @@ class HomeScreenState extends State<HomeScreen> {
                                                 .millisecondsSinceEpoch ~/
                                             1000,
                                         title:
-                                            'Bill Reminder: ${_nameController.text}',
+                                            'Bill Reminder: ${nameController.text}',
                                         body:
-                                            'Your bill for ${_nameController.text} of ${_amountController.text} is due soon!',
+                                            'Your bill for ${nameController.text} of ${amountController.text} is due soon!',
                                         scheduledTime: reminderDateTime,
                                       );
                                     }
                                   }
 
                                   final subscription = {
-                                    'name': _nameController.text,
-                                    'amount': _amountController.text,
-                                    'dueDate': _dueDateController.text,
-                                    'dueTime': _dueTimeController.text,
-                                    'dueDateTime': _selectedDate
+                                    'name': nameController.text,
+                                    'amount': amountController.text,
+                                    'dueDate': dueDateController.text,
+                                    'dueTime': dueTimeController.text,
+                                    'dueDateTime': selectedDate
                                         ?.toIso8601String(),
                                     'reminderTime':
-                                        _selectedReminderTime != null
-                                        ? '${_selectedReminderTime!.hour.toString().padLeft(2, '0')}:${_selectedReminderTime!.minute.toString().padLeft(2, '0')}'
+                                        selectedReminderTime != null
+                                        ? '${selectedReminderTime!.hour.toString().padLeft(2, '0')}:${selectedReminderTime!.minute.toString().padLeft(2, '0')}'
                                         : null,
-                                    'frequency': _selectedFrequency,
-                                    'reminder': _selectedReminder,
-                                    'category': _selectedCategory.id,
-                                    'categoryName': _selectedCategory.name,
-                                    'categoryColor': _selectedCategory.color
+                                    'frequency': selectedFrequency,
+                                    'reminder': selectedReminder,
+                                    'category': selectedCategory.id,
+                                    'categoryName': selectedCategory.name,
+                                    'categoryColor': selectedCategory.color
                                         .toARGB32(),
-                                    'categoryBackgroundColor': _selectedCategory
+                                    'categoryBackgroundColor': selectedCategory
                                         .backgroundColor
                                         .toARGB32(),
-                                    'notes': _notesController.text.isEmpty
+                                    'notes': notesController.text.isEmpty
                                         ? null
-                                        : _notesController.text,
+                                        : notesController.text,
                                   };
                                   if (isEditMode && currentEditIndex != null) {
                                     await _updateBill(currentEditIndex, subscription);
@@ -3415,10 +3899,9 @@ class HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                 ),
-              );
-            },
-          ),
-        ),
+              ),
+          ));
+        },
       ),
     );
   }
@@ -3540,7 +4023,7 @@ class HomeScreenState extends State<HomeScreen> {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: category.backgroundColor.withOpacity(0.1),
+                color: category.backgroundColor.withValues(alpha: 0.1),
                 borderRadius: const BorderRadius.vertical(
                   top: Radius.circular(20),
                 ),
@@ -3639,7 +4122,7 @@ class HomeScreenState extends State<HomeScreen> {
                             border: Border.all(color: Colors.grey[200]!),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.05),
+                                color: Colors.black.withValues(alpha: 0.05),
                                 blurRadius: 4,
                                 offset: const Offset(0, 2),
                               ),
@@ -3701,9 +4184,9 @@ class HomeScreenState extends State<HomeScreen> {
                                       ),
                                       decoration: BoxDecoration(
                                         color: isPaid
-                                            ? Colors.green.withOpacity(0.1)
+                                            ? Colors.green.withValues(alpha: 0.1)
                                             : (isOverdue
-                                                  ? Colors.red.withOpacity(0.1)
+                                                  ? Colors.red.withValues(alpha: 0.1)
                                                   : Colors.orange.withOpacity(
                                                       0.1,
                                                     )),
@@ -3734,7 +4217,7 @@ class HomeScreenState extends State<HomeScreen> {
                               onSelected: (value) async {
                                 switch (value) {
                                   case 'edit':
-                                    _editBill(_bills.indexOf(bill));
+                                    await _editBill(_bills.indexOf(bill));
                                     break;
                                   case 'paid':
                                     await _markBillAsPaid(_bills.indexOf(bill));
@@ -3824,21 +4307,50 @@ class HomeScreenState extends State<HomeScreen> {
   Future<void> _loadSubscriptions() async {
     if (!mounted) return;
 
+    debugPrint('📱 Loading subscriptions (SMART LOCAL-FIRST)...');
     setState(() {
       _isLoading = true;
       _hasError = false;
     });
 
     try {
-      final subscriptions = await _subscriptionService.getSubscriptions();
+      // ALWAYS load from local first (fast, no Firebase needed)
+      debugPrint('🗂️ Loading from local storage...');
+      final localSubscriptions = await _subscriptionService.getLocalSubscriptions();
+
       if (mounted) {
         setState(() {
-          _bills = subscriptions;
+          _bills = localSubscriptions;
           _isLoading = false;
         });
+        debugPrint('✅ UI updated with ${_bills.length} bills from local storage');
       }
+
+      // THEN check if we should sync with Firebase (smart sync)
+      final shouldSync = await _subscriptionService.shouldSyncWithFirebase();
+      if (shouldSync) {
+        debugPrint('🌐 Smart sync triggered, attempting background sync...');
+        try {
+          final syncedSubscriptions = await _subscriptionService.getSubscriptions();
+
+          // Only update UI if data actually changed
+          if (mounted && syncedSubscriptions.length != localSubscriptions.length) {
+            setState(() {
+              _bills = syncedSubscriptions;
+            });
+            debugPrint('🔄 UI updated with synced data: ${_bills.length} bills');
+          } else {
+            debugPrint('✅ No changes needed from sync');
+          }
+        } catch (e) {
+          debugPrint('⚠️ Background sync failed, but local data is available: $e');
+        }
+      } else {
+        debugPrint('⏭️ Skipping sync - not needed or offline');
+      }
+
     } catch (e) {
-      debugPrint('Failed to load subscriptions: $e');
+      debugPrint('❌ Failed to load from local storage: $e');
       if (mounted) {
         setState(() {
           _isLoading = false;
