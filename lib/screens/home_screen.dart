@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 import 'package:projeckt_k/screens/profile_screen.dart';
 import 'package:projeckt_k/services/subscription_service.dart';
 import 'package:projeckt_k/services/notification_service.dart';
@@ -8,6 +9,7 @@ import 'package:projeckt_k/models/category_model.dart';
 import 'package:projeckt_k/widgets/subtitle_changing.dart';
 import 'package:projeckt_k/widgets/bill_summary_cards.dart';
 import 'package:projeckt_k/widgets/bill_item_widget.dart';
+import 'package:projeckt_k/widgets/category_bills_bottom_sheet.dart';
 
 final Color kPrimaryColor = HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor();
 final Color bgUpcomingMuted = HSLColor.fromAHSL(
@@ -36,6 +38,7 @@ class HomeScreenState extends State<HomeScreen> {
   Timer? _updateTimer;
   String selectedCategory = 'all'; // 'all' or specific category id
   String selectedStatus = 'upcoming'; // 'upcoming', 'overdue', 'paid'
+  final ScrollController _categoryScrollController = ScrollController();
   // shared sizes
   // shared sizes
   double sharedTop = 36;
@@ -77,6 +80,7 @@ class HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _categoryScrollController.dispose();
     _connectivitySubscription?.cancel();
     _connectivityNotifier.dispose();
     _updateTimer?.cancel();
@@ -210,7 +214,8 @@ class HomeScreenState extends State<HomeScreen> {
   Future<void> _autoSyncWhenOnline() async {
     try {
       // Check if there's anything to sync first
-      final unsyncedCount = await _subscriptionService.getUnsyncedSubscriptionsCount();
+      final unsyncedCount = await _subscriptionService
+          .getUnsyncedSubscriptionsCount();
 
       if (unsyncedCount > 0) {
         debugPrint('🔄 Found $unsyncedCount items to sync');
@@ -221,7 +226,9 @@ class HomeScreenState extends State<HomeScreen> {
           if (success) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('Auto-sync completed: $unsyncedCount items synced!'),
+                content: Text(
+                  'Auto-sync completed: $unsyncedCount items synced!',
+                ),
                 backgroundColor: Colors.green,
                 duration: const Duration(seconds: 2),
               ),
@@ -1540,24 +1547,39 @@ class HomeScreenState extends State<HomeScreen> {
                                 valueListenable: _connectivityNotifier,
                                 builder: (context, isOnline, child) {
                                   return Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
                                     decoration: BoxDecoration(
                                       color: isOnline
-                                        ? Colors.green.withValues(alpha: 0.1)
-                                        : Colors.grey.withValues(alpha: 0.1),
+                                          ? Colors.green.withValues(alpha: 0.1)
+                                          : Colors.grey.withValues(alpha: 0.1),
                                       borderRadius: BorderRadius.circular(12),
                                       border: Border.all(
-                                        color: isOnline ? Colors.green.withValues(alpha: 0.3) : Colors.grey.withValues(alpha: 0.3),
+                                        color: isOnline
+                                            ? Colors.green.withValues(
+                                                alpha: 0.3,
+                                              )
+                                            : Colors.grey.withValues(
+                                                alpha: 0.3,
+                                              ),
                                         width: 1,
                                       ),
                                     ),
                                     child: Row(
                                       children: [
                                         AnimatedSwitcher(
-                                          duration: const Duration(milliseconds: 200),
+                                          duration: const Duration(
+                                            milliseconds: 200,
+                                          ),
                                           child: Icon(
-                                            isOnline ? Icons.wifi : Icons.wifi_off,
-                                            color: isOnline ? Colors.green : Colors.grey,
+                                            isOnline
+                                                ? Icons.wifi
+                                                : Icons.wifi_off,
+                                            color: isOnline
+                                                ? Colors.green
+                                                : Colors.grey,
                                             size: 14,
                                             key: ValueKey(isOnline),
                                           ),
@@ -1568,7 +1590,9 @@ class HomeScreenState extends State<HomeScreen> {
                                           style: TextStyle(
                                             fontSize: 10,
                                             fontWeight: FontWeight.w500,
-                                            color: isOnline ? Colors.green[700] : Colors.grey[600],
+                                            color: isOnline
+                                                ? Colors.green[700]
+                                                : Colors.grey[600],
                                           ),
                                         ),
                                       ],
@@ -1595,7 +1619,8 @@ class HomeScreenState extends State<HomeScreen> {
                                           .withValues(alpha: 0.15), // light bg
                                       child: Icon(
                                         Icons.person, // 🔄 subscription icon
-                                        color: Colors.indigoAccent, // main color
+                                        color:
+                                            Colors.indigoAccent, // main color
                                         size: 22,
                                       ),
                                     ),
@@ -1731,8 +1756,10 @@ class HomeScreenState extends State<HomeScreen> {
                                 radius: const Radius.circular(20),
                                 thickness: 4,
                                 thumbVisibility: true,
+                                controller: _categoryScrollController,
                                 child: SingleChildScrollView(
                                   scrollDirection: Axis.horizontal,
+                                  controller: _categoryScrollController,
                                   child: Row(
                                     children: _buildCategoryTabsList(),
                                   ),
@@ -1751,15 +1778,16 @@ class HomeScreenState extends State<HomeScreen> {
                           color: Colors.grey[100],
                           borderRadius: BorderRadius.circular(16),
                         ),
-                        child: Row(
-                          children: _buildStatusTabsList(),
-                        ),
+                        child: Row(children: _buildStatusTabsList()),
                       ),
 
                       const SizedBox(height: 16),
 
                       // Filtered Bills Content
-                      Expanded(
+                      Container(
+                        constraints: BoxConstraints(
+                          minHeight: MediaQuery.of(context).size.height * 0.4,
+                        ),
                         child: _buildFilteredBillsContent(),
                       ),
                     ],
@@ -1805,15 +1833,21 @@ class HomeScreenState extends State<HomeScreen> {
                 children: [
                   Icon(
                     status['icon'] as IconData,
-                    color: selectedStatus == status['id'] ? Colors.white : Colors.grey[600],
+                    color: selectedStatus == status['id']
+                        ? Colors.white
+                        : Colors.grey[600],
                     size: 20,
                   ),
                   const SizedBox(height: 4),
                   Text(
                     status['title'] as String,
                     style: TextStyle(
-                      color: selectedStatus == status['id'] ? Colors.white : Colors.grey[600],
-                      fontWeight: selectedStatus == status['id'] ? FontWeight.w600 : FontWeight.w500,
+                      color: selectedStatus == status['id']
+                          ? Colors.white
+                          : Colors.grey[600],
+                      fontWeight: selectedStatus == status['id']
+                          ? FontWeight.w600
+                          : FontWeight.w500,
                       fontSize: 12,
                     ),
                   ),
@@ -1926,9 +1960,7 @@ class HomeScreenState extends State<HomeScreen> {
         ),
 
         // Filtered Bills Content
-        Expanded(
-          child: _buildFilteredBillsContent(),
-        ),
+        Expanded(child: _buildFilteredBillsContent()),
       ],
     );
   }
@@ -1939,7 +1971,15 @@ class HomeScreenState extends State<HomeScreen> {
 
     final now = DateTime.now();
 
-    debugPrint('🔍 Filtering bills - Status: $selectedStatus, Category: $selectedCategory, Total bills: ${_bills.length}');
+    debugPrint(
+      '🔍 Filtering bills - Status: $selectedStatus, Category: $selectedCategory, Total bills: ${_bills.length}',
+    );
+
+    // Debug: Print available categories and selected category
+    debugPrint('🔍 Selected category: "$selectedCategory"');
+    debugPrint('🔍 Available categories in bills:');
+    final availableCategories = _bills.map((bill) => bill['category']?.toString()).where((cat) => cat != null).toSet();
+    debugPrint('  - Categories found: $availableCategories');
 
     for (var bill in _bills) {
       try {
@@ -1949,14 +1989,30 @@ class HomeScreenState extends State<HomeScreen> {
         final billStatus = bill['status']?.toString() ?? '';
         bool matchesStatus = false;
 
+        // Debug status for specific bill that matches category
+        if (bill['name'] == 'health health ') {
+          debugPrint('🔍 Status debug - Bill: "${bill['name']}", Status: "$billStatus", DueDate: $dueDate, SelectedStatus: "$selectedStatus"');
+        }
+
         switch (selectedStatus) {
+          case 'all':
+            // Show reminders for upcoming bills (unpaid bills with due dates)
+            matchesStatus =
+                billStatus != 'paid' &&
+                dueDate != null;
+            break;
           case 'upcoming':
-            matchesStatus = billStatus != 'paid' && dueDate != null &&
-                           dueDate.isAfter(now) &&
-                           dueDate.isBefore(now.add(const Duration(days: 30)));
+            matchesStatus =
+                billStatus != 'paid' &&
+                dueDate != null &&
+                dueDate.isAfter(now) &&
+                dueDate.isBefore(now.add(const Duration(days: 30)));
             break;
           case 'overdue':
-            matchesStatus = billStatus != 'paid' && dueDate != null && dueDate.isBefore(now);
+            matchesStatus =
+                billStatus != 'paid' &&
+                dueDate != null &&
+                dueDate.isBefore(now);
             break;
           case 'paid':
             matchesStatus = billStatus == 'paid';
@@ -1965,18 +2021,45 @@ class HomeScreenState extends State<HomeScreen> {
 
         // Quick category check (more efficient)
         final billCategory = bill['category']?.toString();
-        final matchesCategory = selectedCategory == 'all' || billCategory == selectedCategory;
+        bool matchesCategory = false;
+
+        if (selectedCategory == 'all') {
+          matchesCategory = true;
+        } else {
+          // Try multiple matching strategies for category
+          if (billCategory == null) {
+            // Skip bills with no category when specific category is selected
+            matchesCategory = false;
+          } else {
+            final exactMatch = billCategory == selectedCategory;
+            final containsMatch = billCategory.contains(selectedCategory);
+            final caseInsensitiveMatch = billCategory.toLowerCase() == selectedCategory.toLowerCase();
+
+            matchesCategory = exactMatch || containsMatch || caseInsensitiveMatch;
+          }
+
+          // Debug: Print first few matching attempts
+          if (filteredBills.length < 2) {
+            debugPrint('🔍 Category check - Bill: "${bill['name']}", Category: "$billCategory", Selected: "$selectedCategory", Match: $matchesCategory');
+          }
+        }
 
         // Only add bill if both filters match
         if (matchesStatus && matchesCategory) {
           filteredBills.add(bill);
+          if (bill['name'] == 'health health ') {
+            debugPrint('🔍 Bill "${bill['name']}" ADDED - Status: $matchesStatus, Category: $matchesCategory');
+          }
+        } else if (matchesCategory) {
+          if (bill['name'] == 'health health ') {
+            debugPrint('🔍 Bill "${bill['name']}" FILTERED OUT - Status: $matchesStatus, Category: $matchesCategory');
+          }
         }
       } catch (e) {
         debugPrint('Error filtering bill: $e');
       }
     }
 
-    
     // Sort by due date
     filteredBills.sort((a, b) {
       final aDate = _parseDueDate(a);
@@ -1987,13 +2070,16 @@ class HomeScreenState extends State<HomeScreen> {
       return aDate.compareTo(bDate);
     });
 
+    debugPrint('🔍 Final filtered bills count: ${filteredBills.length}');
+
     if (filteredBills.isEmpty) {
       // Check if there are any bills in this category at all (regardless of status)
       final hasBillsInCategory = selectedCategory == 'all'
           ? _bills.isNotEmpty
-          : _bills.any((bill) => bill['category']?.toString() == selectedCategory);
+          : _bills.any(
+              (bill) => bill['category']?.toString() == selectedCategory,
+            );
 
-      
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -2019,10 +2105,7 @@ class HomeScreenState extends State<HomeScreen> {
               hasBillsInCategory
                   ? 'Try selecting a different status (Upcoming, Paid, Overdue)'
                   : 'Add a new bill to get started',
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey[500],
-              ),
+              style: TextStyle(fontSize: 14, color: Colors.grey[500]),
             ),
           ],
         ),
@@ -2032,13 +2115,16 @@ class HomeScreenState extends State<HomeScreen> {
     return ListView.builder(
       padding: const EdgeInsets.only(bottom: 16),
       itemCount: filteredBills.length,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
       itemBuilder: (context, index) {
         final bill = filteredBills[index];
         // Find the original index in _bills for proper editing/deletion
-        final originalIndex = _bills.indexWhere((b) =>
-          b['id'] == bill['id'] ||
-          b['firebaseId'] == bill['firebaseId'] ||
-          b['localId'] == bill['localId']
+        final originalIndex = _bills.indexWhere(
+          (b) =>
+              b['id'] == bill['id'] ||
+              b['firebaseId'] == bill['firebaseId'] ||
+              b['localId'] == bill['localId'],
         );
         return _buildBillCard(bill, originalIndex);
       },
@@ -2048,9 +2134,12 @@ class HomeScreenState extends State<HomeScreen> {
   Widget _buildBillCard(Map<String, dynamic> bill, int index) {
     final dueDate = _parseDueDate(bill);
     final now = DateTime.now();
-    final isOverdue = dueDate != null && dueDate.isBefore(now) && bill['status'] != 'paid';
+    final isOverdue =
+        dueDate != null && dueDate.isBefore(now) && bill['status'] != 'paid';
     final isPaid = bill['status'] == 'paid';
-    final category = bill['category'] != null ? Category.findById(bill['category'].toString()) : null;
+    final category = bill['category'] != null
+        ? Category.findById(bill['category'].toString())
+        : null;
 
     // Determine status color and text
     Color statusColor;
@@ -2079,7 +2168,9 @@ class HomeScreenState extends State<HomeScreen> {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
           side: BorderSide(
-            color: isOverdue ? Colors.red.withValues(alpha: 0.3) : Colors.transparent,
+            color: isOverdue
+                ? Colors.red.withValues(alpha: 0.3)
+                : Colors.transparent,
             width: isOverdue ? 1 : 0,
           ),
         ),
@@ -2100,7 +2191,8 @@ class HomeScreenState extends State<HomeScreen> {
                           width: 40,
                           height: 40,
                           decoration: BoxDecoration(
-                            color: category?.backgroundColor ?? Colors.grey[200],
+                            color:
+                                category?.backgroundColor ?? Colors.grey[200],
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Icon(
@@ -2142,19 +2234,18 @@ class HomeScreenState extends State<HomeScreen> {
                   ),
                   // Status indicator
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: statusColor.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Row(
+                    child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(
-                          statusIcon,
-                          color: statusColor,
-                          size: 14,
-                        ),
+                        Icon(statusIcon, color: statusColor, size: 14),
                         const SizedBox(width: 4),
                         Text(
                           statusText,
@@ -2181,11 +2272,7 @@ class HomeScreenState extends State<HomeScreen> {
                   // Due date
                   Row(
                     children: [
-                      Icon(
-                        Icons.event,
-                        size: 16,
-                        color: Colors.grey[600],
-                      ),
+                      Icon(Icons.event, size: 16, color: Colors.grey[600]),
                       const SizedBox(width: 6),
                       Text(
                         dueDate != null
@@ -2220,7 +2307,10 @@ class HomeScreenState extends State<HomeScreen> {
                           label: const Text('Pay'),
                           style: TextButton.styleFrom(
                             foregroundColor: Colors.green,
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
                           ),
                         ),
                       const SizedBox(width: 8),
@@ -2236,7 +2326,9 @@ class HomeScreenState extends State<HomeScreen> {
                       ),
                       IconButton(
                         onPressed: () async {
-                          bool? confirm = await _showDeleteConfirmDialog(context);
+                          bool? confirm = await _showDeleteConfirmDialog(
+                            context,
+                          );
                           if (confirm == true) {
                             await _deleteSubscription(index);
                             _loadSubscriptions();
@@ -2880,9 +2972,15 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<void> showAddBillBottomSheet(BuildContext context, {Map<String, dynamic>? bill, int? editIndex}) async {
+  Future<void> showAddBillBottomSheet(
+    BuildContext context, {
+    Map<String, dynamic>? bill,
+    int? editIndex,
+  }) async {
     final bool isEditMode = bill != null && editIndex != null;
-    debugPrint('📝 Edit mode: $isEditMode, bill: ${bill?['name']}, editIndex: $editIndex');
+    debugPrint(
+      '📝 Edit mode: $isEditMode, bill: ${bill?['name']}, editIndex: $editIndex',
+    );
 
     // Declare variables outside StatefulBuilder to maintain state
     final formKey = GlobalKey<FormState>();
@@ -2901,11 +2999,21 @@ class HomeScreenState extends State<HomeScreen> {
     final int? currentEditIndex = editIndex;
 
     // Initialize variables
-    nameController = TextEditingController(text: bill?['name']?.toString() ?? '');
-    amountController = TextEditingController(text: bill?['amount']?.toString() ?? '');
-    dueDateController = TextEditingController(text: bill?['dueDate']?.toString() ?? '');
-    dueTimeController = TextEditingController(text: bill?['dueTime']?.toString() ?? '');
-    notesController = TextEditingController(text: bill?['notes']?.toString() ?? '');
+    nameController = TextEditingController(
+      text: bill?['name']?.toString() ?? '',
+    );
+    amountController = TextEditingController(
+      text: bill?['amount']?.toString() ?? '',
+    );
+    dueDateController = TextEditingController(
+      text: bill?['dueDate']?.toString() ?? '',
+    );
+    dueTimeController = TextEditingController(
+      text: bill?['dueTime']?.toString() ?? '',
+    );
+    notesController = TextEditingController(
+      text: bill?['notes']?.toString() ?? '',
+    );
     reminderTimeController = TextEditingController();
     selectedDate = null;
     selectedTime = null;
@@ -2920,10 +3028,14 @@ class HomeScreenState extends State<HomeScreen> {
       final parsedDate = _parseDueDate(bill!);
       if (parsedDate != null) {
         selectedDate = parsedDate;
-        selectedTime = TimeOfDay(hour: parsedDate.hour, minute: parsedDate.minute);
+        selectedTime = TimeOfDay(
+          hour: parsedDate.hour,
+          minute: parsedDate.minute,
+        );
 
         // Format date and time for display
-        dueDateController.text = '${parsedDate.day.toString().padLeft(2, '0')}/${parsedDate.month.toString().padLeft(2, '0')}/${parsedDate.year}';
+        dueDateController.text =
+            '${parsedDate.day.toString().padLeft(2, '0')}/${parsedDate.month.toString().padLeft(2, '0')}/${parsedDate.year}';
         dueTimeController.text = selectedTime?.format(context) ?? '';
       }
 
@@ -3002,12 +3114,18 @@ class HomeScreenState extends State<HomeScreen> {
                             width: 32,
                             height: 32,
                             decoration: BoxDecoration(
-                              color: (isEditMode ? Colors.orange[700]! : kPrimaryColor).withValues(alpha: 0.1),
+                              color:
+                                  (isEditMode
+                                          ? Colors.orange[700]!
+                                          : kPrimaryColor)
+                                      .withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Icon(
                               isEditMode ? Icons.edit : Icons.add,
-                              color: isEditMode ? Colors.orange[700]! : kPrimaryColor,
+                              color: isEditMode
+                                  ? Colors.orange[700]!
+                                  : kPrimaryColor,
                               size: 18,
                             ),
                           ),
@@ -3017,7 +3135,9 @@ class HomeScreenState extends State<HomeScreen> {
                             style: Theme.of(context).textTheme.titleMedium
                                 ?.copyWith(
                                   fontWeight: FontWeight.w600,
-                                  color: isEditMode ? Colors.orange[700]! : kPrimaryColor,
+                                  color: isEditMode
+                                      ? Colors.orange[700]!
+                                      : kPrimaryColor,
                                   fontSize: 16,
                                 ),
                           ),
@@ -3619,7 +3739,8 @@ class HomeScreenState extends State<HomeScreen> {
                                     await _getDefaultNotificationTime();
                                 final TimeOfDay? picked = await showTimePicker(
                                   context: context,
-                                  initialTime: selectedReminderTime ?? defaultTime,
+                                  initialTime:
+                                      selectedReminderTime ?? defaultTime,
                                 );
                                 if (picked != null) {
                                   setState(() {
@@ -3685,7 +3806,9 @@ class HomeScreenState extends State<HomeScreen> {
                                       Text(
                                         selectedReminder == 'No reminder'
                                             ? 'No reminder set'
-                                            : (selectedReminderTime?.format(context) ??
+                                            : (selectedReminderTime?.format(
+                                                    context,
+                                                  ) ??
                                                   'Select reminder time'),
                                         style: TextStyle(
                                           color:
@@ -3829,11 +3952,15 @@ class HomeScreenState extends State<HomeScreen> {
                                   }
 
                                   // Schedule notification if reminder time is selected
-                                  if (selectedReminderTime != null && selectedReminder != 'No reminder') {
+                                  if (selectedReminderTime != null &&
+                                      selectedReminder != 'No reminder') {
                                     // Calculate the actual reminder date based on the reminder preference
                                     DateTime reminderDate;
                                     if (selectedDate != null) {
-                                      reminderDate = _calculateReminderDate(selectedDate!, selectedReminder);
+                                      reminderDate = _calculateReminderDate(
+                                        selectedDate!,
+                                        selectedReminder,
+                                      );
                                     } else {
                                       reminderDate = DateTime.now();
                                     }
@@ -3872,8 +3999,7 @@ class HomeScreenState extends State<HomeScreen> {
                                     'dueTime': dueTimeController.text,
                                     'dueDateTime': selectedDate
                                         ?.toIso8601String(),
-                                    'reminderTime':
-                                        selectedReminderTime != null
+                                    'reminderTime': selectedReminderTime != null
                                         ? '${selectedReminderTime!.hour.toString().padLeft(2, '0')}:${selectedReminderTime!.minute.toString().padLeft(2, '0')}'
                                         : null,
                                     'frequency': selectedFrequency,
@@ -3890,7 +4016,10 @@ class HomeScreenState extends State<HomeScreen> {
                                         : notesController.text,
                                   };
                                   if (isEditMode && currentEditIndex != null) {
-                                    await _updateBill(currentEditIndex, subscription);
+                                    await _updateBill(
+                                      currentEditIndex,
+                                      subscription,
+                                    );
                                   } else {
                                     await _addSubscription(subscription);
                                   }
@@ -3921,7 +4050,8 @@ class HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ),
-          ));
+            ),
+          );
         },
       ),
     );
@@ -3937,12 +4067,10 @@ class HomeScreenState extends State<HomeScreen> {
         // Try to add to Firebase first
         await _subscriptionService.addSubscription(subscription);
 
-        // If successful, add to local list
+        // If successful, refresh from local to ensure consistency
         if (mounted) {
-          setState(() {
-            _bills.add(subscription);
-            _checkForOverdueBills(); // Immediate check for overdue status
-          });
+          await _refreshBillsForCategory(); // Refresh from local storage
+          _checkForOverdueBills(); // Immediate check for overdue status
 
           // Show success message
           ScaffoldMessenger.of(context).showSnackBar(
@@ -3963,10 +4091,8 @@ class HomeScreenState extends State<HomeScreen> {
         if (!_isOnline) {
           // Only show offline message if actually offline
           if (mounted) {
-            setState(() {
-              _bills.add(subscription);
-              _checkForOverdueBills(); // Immediate check for overdue status
-            });
+            await _refreshBillsForCategory(); // Refresh from local storage
+            _checkForOverdueBills(); // Immediate check for overdue status
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(
@@ -4020,309 +4146,42 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   void showCategoryBillsBottomSheet(BuildContext context, Category category) {
-    // Filter bills for the selected category
-    final categoryBills = _bills
-        .where(
-          (bill) =>
-              bill['category']?.toString() == category.id,
-        )
-        .toList();
+    // First ensure we have the latest data
+    _refreshBillsForCategory();
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        height: MediaQuery.of(context).size.height * 0.7,
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        child: Column(
-          children: [
-            // Header
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: category.backgroundColor.withValues(alpha: 0.1),
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(20),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: category.backgroundColor,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(category.icon, color: category.color, size: 20),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          category.name,
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.black87,
-                          ),
-                        ),
-                        Text(
-                          '${categoryBills.length} bills',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close),
-                  ),
-                ],
-              ),
-            ),
-
-            // Bills List
-            Expanded(
-              child: categoryBills.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.receipt_long_outlined,
-                            size: 64,
-                            color: Colors.grey[400],
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            'No bills in ${category.name}',
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Add a new bill to get started',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey[500],
-                            ),
-                          ),
-                        ],
-                      ),
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.all(16),
-                      itemCount: categoryBills.length,
-                      itemBuilder: (context, index) {
-                        final bill = categoryBills[index];
-                        final dueDate = _parseDueDate(bill);
-                        final now = DateTime.now();
-                        final isOverdue =
-                            dueDate != null &&
-                            dueDate.isBefore(now) &&
-                            bill['status'] != 'paid';
-                        final isPaid = bill['status'] == 'paid';
-
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 12),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.grey[200]!),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.05),
-                                blurRadius: 4,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: ListTile(
-                            contentPadding: const EdgeInsets.all(16),
-                            title: Text(
-                              bill['name'] ?? 'Unnamed Bill',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 16,
-                              ),
-                            ),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const SizedBox(height: 4),
-                                Row(
-                                  children: [
-                                    Icon(
-                                      Icons.calendar_today_outlined,
-                                      size: 14,
-                                      color: Colors.grey[600],
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      dueDate != null
-                                          ? _formatDate(dueDate)
-                                          : 'No due date',
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        color: Colors.grey[600],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      '\$${_parseAmount(bill['amount']).toStringAsFixed(2)}',
-                                      style: TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold,
-                                        color: isPaid
-                                            ? Colors.green
-                                            : (isOverdue
-                                                  ? Colors.red
-                                                  : Colors.black87),
-                                      ),
-                                    ),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 4,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: isPaid
-                                            ? Colors.green.withValues(alpha: 0.1)
-                                            : (isOverdue
-                                                  ? Colors.red.withValues(alpha: 0.1)
-                                                  : Colors.orange.withOpacity(
-                                                      0.1,
-                                                    )),
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                      child: Text(
-                                        isPaid
-                                            ? 'Paid'
-                                            : (isOverdue
-                                                  ? 'Overdue'
-                                                  : 'Pending'),
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w500,
-                                          color: isPaid
-                                              ? Colors.green[700]
-                                              : (isOverdue
-                                                    ? Colors.red[700]
-                                                    : Colors.orange[700]),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                            trailing: PopupMenuButton<String>(
-                              onSelected: (value) async {
-                                switch (value) {
-                                  case 'edit':
-                                    await _editBill(_bills.indexOf(bill));
-                                    break;
-                                  case 'paid':
-                                    await _markBillAsPaid(_bills.indexOf(bill));
-                                    break;
-                                  case 'delete':
-                                    bool? confirm =
-                                        await _showDeleteConfirmDialog(context);
-                                    if (confirm == true) {
-                                      await _deleteSubscription(
-                                        _bills.indexOf(bill),
-                                      );
-                                    }
-                                    break;
-                                }
-                              },
-                              itemBuilder: (context) => [
-                                const PopupMenuItem(
-                                  value: 'edit',
-                                  child: Row(
-                                    children: [
-                                      Icon(Icons.edit, size: 16),
-                                      SizedBox(width: 8),
-                                      Text('Edit'),
-                                    ],
-                                  ),
-                                ),
-                                if (!isPaid)
-                                  const PopupMenuItem(
-                                    value: 'paid',
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.check_circle, size: 16),
-                                        SizedBox(width: 8),
-                                        Text('Mark as Paid'),
-                                      ],
-                                    ),
-                                  ),
-                                const PopupMenuItem(
-                                  value: 'delete',
-                                  child: Row(
-                                    children: [
-                                      Icon(Icons.delete, size: 16),
-                                      SizedBox(width: 8),
-                                      Text('Delete'),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-            ),
-
-            // Add New Bill Button
-            if (categoryBills.isEmpty)
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.pop(context); // Close bills bottom sheet
-                      // Return to add bill flow with this category pre-selected
-                      Navigator.pop(context, category);
-                    },
-                    icon: const Icon(Icons.add),
-                    label: Text('Add ${category.name} Bill'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: category.backgroundColor,
-                      foregroundColor: category.color,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
+      builder: (context) => CategoryBillsBottomSheet(
+        category: category,
+        subscriptionService: _subscriptionService,
+        onBillAdded: () {
+          // Refresh the main bills list when a new bill is added
+          _loadSubscriptions();
+        },
       ),
     );
+  }
+
+  // Refresh bills specifically for category display
+  Future<void> _refreshBillsForCategory() async {
+    try {
+      // Always get latest local data first
+      final localSubscriptions = await _subscriptionService
+          .getLocalSubscriptions();
+
+      if (mounted) {
+        setState(() {
+          _bills = localSubscriptions;
+        });
+        debugPrint(
+          '🔄 Refreshed bills for category: ${_bills.length} bills loaded',
+        );
+      }
+    } catch (e) {
+      debugPrint('⚠️ Failed to refresh bills for category: $e');
+    }
   }
 
   Future<void> _loadSubscriptions() async {
@@ -4337,14 +4196,17 @@ class HomeScreenState extends State<HomeScreen> {
     try {
       // ALWAYS load from local first (fast, no Firebase needed)
       debugPrint('🗂️ Loading from local storage...');
-      final localSubscriptions = await _subscriptionService.getLocalSubscriptions();
+      final localSubscriptions = await _subscriptionService
+          .getLocalSubscriptions();
 
       if (mounted) {
         setState(() {
           _bills = localSubscriptions;
           _isLoading = false;
         });
-        debugPrint('✅ UI updated with ${_bills.length} bills from local storage');
+        debugPrint(
+          '✅ UI updated with ${_bills.length} bills from local storage',
+        );
       }
 
       // THEN check if we should sync with Firebase (smart sync)
@@ -4352,24 +4214,29 @@ class HomeScreenState extends State<HomeScreen> {
       if (shouldSync) {
         debugPrint('🌐 Smart sync triggered, attempting background sync...');
         try {
-          final syncedSubscriptions = await _subscriptionService.getSubscriptions();
+          final syncedSubscriptions = await _subscriptionService
+              .getSubscriptions();
 
           // Only update UI if data actually changed
-          if (mounted && syncedSubscriptions.length != localSubscriptions.length) {
+          if (mounted &&
+              syncedSubscriptions.length != localSubscriptions.length) {
             setState(() {
               _bills = syncedSubscriptions;
             });
-            debugPrint('🔄 UI updated with synced data: ${_bills.length} bills');
+            debugPrint(
+              '🔄 UI updated with synced data: ${_bills.length} bills',
+            );
           } else {
             debugPrint('✅ No changes needed from sync');
           }
         } catch (e) {
-          debugPrint('⚠️ Background sync failed, but local data is available: $e');
+          debugPrint(
+            '⚠️ Background sync failed, but local data is available: $e',
+          );
         }
       } else {
         debugPrint('⏭️ Skipping sync - not needed or offline');
       }
-
     } catch (e) {
       debugPrint('❌ Failed to load from local storage: $e');
       if (mounted) {

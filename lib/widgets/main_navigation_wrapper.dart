@@ -73,7 +73,7 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
             _buildNavItem(Icons.home, 0, "Home"),
-            _buildNavItem(Icons.analytics, 1, "Analytics"),
+            _buildNavItem(Icons.analytics_sharp, 1, "Analytics"),
 
             // Floating Add Button
             GestureDetector(

@@ -26,6 +26,7 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scrollController = ScrollController();
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'SubManager',
@@ -72,6 +73,12 @@ class MyApp extends StatelessWidget {
       },
       onUnknownRoute: (settings) {
         return MaterialPageRoute(builder: (context) => AuthWrapper(syncService: syncService));
+      },
+      builder: (context, child) {
+        return PrimaryScrollController(
+          controller: scrollController,
+          child: child!,
+        );
       },
     );
   }
