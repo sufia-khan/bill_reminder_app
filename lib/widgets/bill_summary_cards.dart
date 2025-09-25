@@ -13,28 +13,26 @@ class BillSummaryCard extends StatelessWidget {
     this.secondaryAmount,
     this.secondaryText,
 
-    // ↓ Even smaller layout heights
+    // ↓ 30% smaller layout heights
     this.topBoxHeight = 2,
-    this.middleBoxHeight = 42,
-    this.bottomBoxHeight = 28,
+    this.middleBoxHeight = 28, // was ~38 → -30%
+    this.bottomBoxHeight = 16, // was ~22 → -30%
+    // ↓ fonts (middle made a bit bigger again)
+    this.primaryFontSize = 24, // was 22 → bumped slightly
+    this.minPrimaryFontSize = 10,
+    this.bottomAmountFontSize = 9,
+    this.bottomTextFontSize = 9,
+    this.minBottomFontSize = 7,
 
-    // ↓ Smaller font sizes
-    this.primaryFontSize = 20,
-    this.minPrimaryFontSize = 9,
-    this.bottomAmountFontSize = 10,
-    this.bottomTextFontSize = 10,
-    this.minBottomFontSize = 8,
+    // ↓ tighter padding to shrink card
+    this.innerPadding = const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
 
-    // ↓ Reduced padding inside card
-    this.innerPadding = const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-
-    // ↓ Smaller icon
-    this.iconSize = 24,
+    // keep icon bigger for balance
+    this.iconSize = 26,
     this.iconOnRight = false,
-    this.textIconGap = 5,
+    this.textIconGap = 6,
   }) : assert(gradientColors.length >= 2),
        super(key: key);
-
   final String title;
   final IconData icon;
   final List<Color> gradientColors;
@@ -56,7 +54,6 @@ class BillSummaryCard extends StatelessWidget {
   final double iconSize;
   final bool iconOnRight;
   final double textIconGap;
-
   Widget _topRow() {
     final iconWidget = Container(
       width: iconSize,
@@ -68,17 +65,24 @@ class BillSummaryCard extends StatelessWidget {
       child: Icon(icon, color: Colors.white, size: iconSize * 0.55),
     );
 
-    final titleWidget = AutoSizeText(
-      title,
-      textAlign: TextAlign.left,
-      style: GoogleFonts.poppins(
-        color: Colors.white,
-        fontSize: 14,
-        fontWeight: FontWeight.w600,
+    final titleWidget = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(12), // rounded corners
       ),
-      maxLines: 1,
-      minFontSize: 10,
-      overflow: TextOverflow.ellipsis,
+      child: AutoSizeText(
+        title,
+        textAlign: TextAlign.left,
+        style: GoogleFonts.poppins(
+          color: Colors.white,
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+        ),
+        maxLines: 1,
+        minFontSize: 10,
+        overflow: TextOverflow.ellipsis,
+      ),
     );
 
     return Row(

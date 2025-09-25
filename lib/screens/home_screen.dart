@@ -32,6 +32,7 @@ class HomeScreenState extends State<HomeScreen> {
   bool _hasError = false;
   bool _isOnline = false;
   StreamSubscription<bool>? _connectivitySubscription;
+  final ValueNotifier<bool> _connectivityNotifier = ValueNotifier<bool>(false);
   Timer? _updateTimer;
   String selectedCategory = 'all'; // 'all' or specific category id
   String selectedStatus = 'upcoming'; // 'upcoming', 'overdue', 'paid'
@@ -77,6 +78,7 @@ class HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _connectivitySubscription?.cancel();
+    _connectivityNotifier.dispose();
     _updateTimer?.cancel();
     super.dispose();
   }
@@ -88,6 +90,7 @@ class HomeScreenState extends State<HomeScreen> {
       setState(() {
         _isOnline = isOnline;
       });
+      _connectivityNotifier.value = isOnline;
     }
   }
 
@@ -100,6 +103,7 @@ class HomeScreenState extends State<HomeScreen> {
             setState(() {
               _isOnline = isOnline;
             });
+            _connectivityNotifier.value = isOnline;
 
             // Auto-sync when coming online
             if (isOnline) {
@@ -1531,27 +1535,44 @@ class HomeScreenState extends State<HomeScreen> {
                           // Sync status and profile row
                           Row(
                             children: [
-                              // Sync status indicator
-                              StreamBuilder<bool>(
-                                stream: _subscriptionService.connectivityStream(),
-                                builder: (context, snapshot) {
-                                  final isOnline = snapshot.data ?? false;
-                                  return Row(
-                                    children: [
-                                      Icon(
-                                        isOnline ? Icons.cloud_done : Icons.cloud_off,
-                                        color: isOnline ? Colors.green : Colors.grey,
-                                        size: 18,
+                              // Enhanced network status indicator
+                              ValueListenableBuilder<bool>(
+                                valueListenable: _connectivityNotifier,
+                                builder: (context, isOnline, child) {
+                                  return Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: isOnline
+                                        ? Colors.green.withValues(alpha: 0.1)
+                                        : Colors.grey.withValues(alpha: 0.1),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: isOnline ? Colors.green.withValues(alpha: 0.3) : Colors.grey.withValues(alpha: 0.3),
+                                        width: 1,
                                       ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        _subscriptionService.getSyncStatus(),
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          color: Colors.grey[600],
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        AnimatedSwitcher(
+                                          duration: const Duration(milliseconds: 200),
+                                          child: Icon(
+                                            isOnline ? Icons.wifi : Icons.wifi_off,
+                                            color: isOnline ? Colors.green : Colors.grey,
+                                            size: 14,
+                                            key: ValueKey(isOnline),
+                                          ),
                                         ),
-                                      ),
-                                    ],
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          isOnline ? 'Online' : 'Offline',
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w500,
+                                            color: isOnline ? Colors.green[700] : Colors.grey[600],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   );
                                 },
                               ),
@@ -4003,7 +4024,7 @@ class HomeScreenState extends State<HomeScreen> {
     final categoryBills = _bills
         .where(
           (bill) =>
-              bill['category']?.toLowerCase() == category.name.toLowerCase(),
+              bill['category']?.toString() == category.id,
         )
         .toList();
 

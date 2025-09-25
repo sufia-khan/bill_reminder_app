@@ -202,57 +202,67 @@ class SubscriptionService {
     }
   }
 
-  // Check if user is online with improved connectivity detection
+  // Check if user is online with enhanced connectivity detection
   Future<bool> isOnline() async {
     try {
-      // First check network connectivity
+      // First check basic network connectivity
       final connectivityResult = await Connectivity().checkConnectivity();
       if (connectivityResult == ConnectivityResult.none) {
         debugPrint('No network connectivity detected');
         return false;
       }
 
-      // Then check Firebase connectivity with multiple approaches
-      final timeout = const Duration(seconds: 3);
+      // Then check actual internet connectivity with a more reliable approach
+      final timeout = const Duration(seconds: 2); // Reduced timeout for faster response
 
-      // Try 1: Basic Firebase connection test
+      // Try 1: Quick auth check (fastest)
       try {
-        await _firestore.collection('connectivity_test').doc('test').get().timeout(timeout);
-      } catch (e) {
-        debugPrint('Firebase connectivity test 1 failed: $e');
-
-        // Try 2: Alternative test with user document
-        try {
-          await _firestore.collection('users').doc(_auth.currentUser?.uid).get().timeout(timeout);
-        } catch (e2) {
-          debugPrint('Firebase connectivity test 2 failed: $e2');
-
-          // Try 3: Simple ping to Firebase
-          try {
-            await _firestore.collection('ping').limit(1).get().timeout(timeout);
-          } catch (e3) {
-            debugPrint('All Firebase connectivity tests failed: $e3');
-            return false;
-          }
+        final user = _auth.currentUser;
+        if (user != null) {
+          await user.getIdToken(true).timeout(timeout);
+          debugPrint('✅ Auth connectivity confirmed');
+          return true;
         }
+      } catch (e) {
+        debugPrint('Auth connectivity test failed: $e');
       }
 
-      debugPrint('Successfully connected to Firebase');
-      return true;
+      // Try 2: Lightweight Firebase operation
+      try {
+        await _firestore.collection('users').limit(1).get().timeout(timeout);
+        debugPrint('✅ Firebase connectivity confirmed');
+        return true;
+      } catch (e) {
+        debugPrint('Firebase connectivity test failed: $e');
+        return false;
+      }
     } catch (e) {
       debugPrint('Network check failed: $e');
       return false;
     }
   }
 
-  // Stream for connectivity changes
+  // Enhanced stream for connectivity changes with immediate updates
   Stream<bool> connectivityStream() async* {
     final connectivity = Connectivity();
+    bool lastState = false;
+
     await for (final result in connectivity.onConnectivityChanged) {
       if (result == ConnectivityResult.none) {
+        lastState = false;
         yield false;
       } else {
-        yield await isOnline();
+        // For immediate feedback, yield true quickly first, then verify
+        yield true;
+
+        // Then verify actual internet connectivity
+        final isActuallyOnline = await isOnline();
+
+        // Only emit if state changed
+        if (isActuallyOnline != lastState) {
+          lastState = isActuallyOnline;
+          yield isActuallyOnline;
+        }
       }
     }
   }
@@ -322,6 +332,29 @@ class SubscriptionService {
       return '${difference.inHours} hours ago';
     } else {
       return '${difference.inDays} days ago';
+    }
+  }
+
+  // Get detailed connectivity status for UI
+  Future<Map<String, dynamic>> getDetailedConnectivityStatus() async {
+    try {
+      final connectivityResult = await Connectivity().checkConnectivity();
+      final hasInternet = await isOnline();
+
+      return {
+        'isOnline': hasInternet,
+        'connectivityType': connectivityResult.toString().split('.').last,
+        'hasInternet': hasInternet,
+        'lastSync': getSyncStatus(),
+      };
+    } catch (e) {
+      return {
+        'isOnline': false,
+        'connectivityType': 'none',
+        'hasInternet': false,
+        'lastSync': getSyncStatus(),
+        'error': e.toString(),
+      };
     }
   }
 
