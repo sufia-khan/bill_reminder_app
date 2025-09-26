@@ -31,236 +31,314 @@ class BillItemWidget extends StatelessWidget {
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      child: Card(
-        elevation: 3,
-        shadowColor: Colors.black.withOpacity(0.1),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(
-            color: isPaid
-                ? Colors.green.withOpacity(0.3)
-                : (isOverdue
-                      ? Colors.red.withOpacity(0.3)
-                      : Colors.orange.withOpacity(0.3)),
-            width: 1,
-          ),
-        ),
-        child: Container(
+      child: Dismissible(
+        key: Key('bill_${bill['id']}_${bill['localId']}_${billIndex}_${DateTime.now().millisecondsSinceEpoch}'),
+        background: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
           decoration: BoxDecoration(
+            color: Colors.red,
             borderRadius: BorderRadius.circular(16),
-            color: Colors.white,
             boxShadow: [
               BoxShadow(
-                color: isPaid
-                    ? Colors.green.withOpacity(0.08)
-                    : (isOverdue
-                          ? Colors.red.withOpacity(0.08)
-                          : Colors.orange.withOpacity(0.08)),
-                blurRadius: 12,
-                spreadRadius: 1,
+                color: Colors.red.withOpacity(0.3),
+                blurRadius: 8,
                 offset: const Offset(0, 2),
               ),
             ],
           ),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Category Row
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[100],
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            _getCategoryIcon(bill['category']),
-                            size: 14,
-                            color: Colors.grey[700],
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            _getCategoryName(bill['category']),
-                            style: GoogleFonts.poppins(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
+          alignment: Alignment.centerRight,
+          padding: const EdgeInsets.only(right: 24),
+          child: const Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.delete, color: Colors.white, size: 32),
+              SizedBox(height: 6),
+              Text(
+                'Delete',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
+            ],
+          ),
+        ),
+        secondaryBackground: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          decoration: BoxDecoration(
+            color: Colors.red[800],
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.red.withOpacity(0.3),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          alignment: Alignment.centerLeft,
+          padding: const EdgeInsets.only(left: 24),
+          child: const Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.delete_forever, color: Colors.white, size: 32),
+              SizedBox(height: 6),
+              Text(
+                'Delete',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
+            ],
+          ),
+        ),
+        direction: DismissDirection.endToStart,
+        dismissThresholds: {
+          DismissDirection.endToStart: 0.3, // Lower threshold for easier swipe
+          DismissDirection.startToEnd: 0.3,
+        },
+        confirmDismiss: (direction) async {
+          debugPrint('🔍 Swipe detected: $direction for bill ${bill['name']}');
+          return await _showDeleteConfirmDialog(context, bill);
+        },
+        onDismissed: (direction) {
+          debugPrint('🗑️ Bill dismissed: ${bill['name']} in direction: $direction');
+          onDelete(billIndex);
+        },
+        child: Card(
+          elevation: 3,
+          shadowColor: Colors.black.withOpacity(0.1),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(
+              color: isPaid
+                  ? Colors.green.withOpacity(0.3)
+                  : (isOverdue
+                        ? Colors.red.withOpacity(0.3)
+                        : Colors.orange.withOpacity(0.3)),
+              width: 1,
+            ),
+          ),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              color: Colors.white,
+              boxShadow: [
+                BoxShadow(
+                  color: isPaid
+                      ? Colors.green.withOpacity(0.08)
+                      : (isOverdue
+                            ? Colors.red.withOpacity(0.08)
+                            : Colors.orange.withOpacity(0.08)),
+                  blurRadius: 12,
+                  spreadRadius: 1,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Category Row
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[100],
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _getCategoryIcon(bill['category']),
+                              size: 14,
                               color: Colors.grey[700],
                             ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Spacer(),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: isPaid
-                            ? Colors.green
-                            : (isOverdue ? Colors.red : Colors.orange),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        isPaid
-                            ? 'Paid'
-                            : (isOverdue ? 'Overdue' : 'Upcoming'),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
+                            const SizedBox(width: 4),
+                            Text(
+                              _getCategoryName(bill['category']),
+                              style: GoogleFonts.poppins(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                                color: Colors.grey[700],
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                // Main Content Row
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      const Spacer(),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isPaid
+                              ? Colors.green
+                              : (isOverdue ? Colors.red : Colors.orange),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          isPaid
+                              ? 'Paid'
+                              : (isOverdue ? 'Overdue' : 'Upcoming'),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  // Main Content Row
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              bill['name'] ?? 'Unknown Bill',
+                              style: GoogleFonts.poppins(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 16,
+                                color: Colors.black87,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(6),
+                                  decoration: BoxDecoration(
+                                    color: isPaid
+                                        ? Colors.green.withOpacity(0.1)
+                                        : (isOverdue
+                                              ? Colors.red.withOpacity(0.1)
+                                              : Colors.orange.withOpacity(0.1)),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Icon(
+                                    isPaid
+                                        ? Icons.check_circle
+                                        : (isOverdue ? Icons.error : Icons.access_time),
+                                    color: isPaid
+                                        ? Colors.green
+                                        : (isOverdue ? Colors.red : Colors.orange),
+                                    size: 16,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            Icons.calendar_today,
+                                            size: 12,
+                                            color: Colors.grey[600],
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            dueDate != null
+                                                ? _formatDate(dueDate)
+                                                : 'No due date',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: Colors.grey[600],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           Text(
-                            bill['name'] ?? 'Unknown Bill',
+                            '\$${_parseAmount(bill['amount']).toStringAsFixed(2)}',
                             style: GoogleFonts.poppins(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 18,
                               color: Colors.black87,
                             ),
                           ),
-                          const SizedBox(height: 6),
-                          Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(6),
-                                decoration: BoxDecoration(
-                                  color: isPaid
-                                      ? Colors.green.withOpacity(0.1)
-                                      : (isOverdue
-                                            ? Colors.red.withOpacity(0.1)
-                                            : Colors.orange.withOpacity(0.1)),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Icon(
-                                  isPaid
-                                      ? Icons.check_circle
-                                      : (isOverdue ? Icons.error : Icons.access_time),
-                                  color: isPaid
-                                      ? Colors.green
-                                      : (isOverdue ? Colors.red : Colors.orange),
-                                  size: 16,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Icon(
-                                          Icons.calendar_today,
-                                          size: 12,
-                                          color: Colors.grey[600],
-                                        ),
-                                        const SizedBox(width: 4),
-                                        Text(
-                                          dueDate != null
-                                              ? _formatDate(dueDate)
-                                              : 'No due date',
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            color: Colors.grey[600],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
                         ],
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          '\$${_parseAmount(bill['amount']).toStringAsFixed(2)}',
-                          style: GoogleFonts.poppins(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
-                            color: Colors.black87,
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      if (!isPaid) ...[
+                        OutlinedButton.icon(
+                          onPressed: bill['_isUpdating'] == true ? null : () => onMarkAsPaid(billIndex),
+                          icon: bill['_isUpdating'] == true
+                              ? SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(Colors.green),
+                                  ),
+                                )
+                              : const Icon(Icons.check, size: 14),
+                          label: bill['_isUpdating'] == true ? const Text('Updating...') : const Text('Mark Paid'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.green,
+                            side: const BorderSide(color: Colors.green),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            minimumSize: Size(0, 32),
                           ),
                         ),
+                        const SizedBox(width: 8),
                       ],
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    if (!isPaid) ...[
                       OutlinedButton.icon(
-                        onPressed: bill['_isUpdating'] == true ? null : () => onMarkAsPaid(billIndex),
-                        icon: bill['_isUpdating'] == true
+                        onPressed: bill['_isDeleting'] == true || bill['_isUpdating'] == true
+                            ? null
+                            : () => useHomeScreenEdit
+                                ? onEdit({...bill, 'originalIndex': bill['index'] ?? 0})
+                                : onEdit(bill),
+                        icon: bill['_isDeleting'] == true
                             ? SizedBox(
                                 width: 14,
                                 height: 14,
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.green),
+                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
                                 ),
                               )
-                            : const Icon(Icons.check, size: 14),
-                        label: bill['_isUpdating'] == true ? const Text('Updating...') : const Text('Mark Paid'),
+                            : const Icon(Icons.edit, size: 14),
+                        label: bill['_isDeleting'] == true ? const Text('Deleting...') : const Text('Edit'),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.green,
-                          side: const BorderSide(color: Colors.green),
+                          foregroundColor: Colors.blue,
+                          side: const BorderSide(color: Colors.blue),
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                           minimumSize: Size(0, 32),
                         ),
                       ),
-                      const SizedBox(width: 8),
                     ],
-                    OutlinedButton.icon(
-                      onPressed: bill['_isDeleting'] == true || bill['_isUpdating'] == true
-                          ? null
-                          : () => useHomeScreenEdit
-                              ? onEdit({...bill, 'originalIndex': bill['index'] ?? 0})
-                              : onEdit(bill),
-                      icon: bill['_isDeleting'] == true
-                          ? SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
-                              ),
-                            )
-                          : const Icon(Icons.edit, size: 14),
-                      label: bill['_isDeleting'] == true ? const Text('Deleting...') : const Text('Edit'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.blue,
-                        side: const BorderSide(color: Colors.blue),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        minimumSize: Size(0, 32),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -316,5 +394,30 @@ class BillItemWidget extends StatelessWidget {
       return double.tryParse(amount) ?? 0.0;
     }
     return 0.0;
+  }
+
+  Future<bool?> _showDeleteConfirmDialog(BuildContext context, Map<String, dynamic> bill) async {
+    final billName = bill['name']?.toString() ?? 'Unknown Bill';
+
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Bill'),
+        content: Text(
+          'Are you sure you want to delete "$billName"? This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
   }
 }

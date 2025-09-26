@@ -43,6 +43,10 @@ class HomeScreenState extends State<HomeScreen> {
   double baseBottomAmountFontSize = 14;
   double baseBottomTextFontSize = 13;
 
+  // Loading states
+  bool _isAddingBill = false;
+  bool _isMarkingPaid = false;
+
   @override
   void initState() {
     super.initState();
@@ -98,7 +102,9 @@ class HomeScreenState extends State<HomeScreen> {
     _connectivitySubscription = _subscriptionService
         .connectivityStream()
         .listen((isOnline) {
-          debugPrint('Connectivity stream update: $isOnline (was offline: $wasOffline)');
+          debugPrint(
+            'Connectivity stream update: $isOnline (was offline: $wasOffline)',
+          );
           if (mounted) {
             setState(() {
               _isOnline = isOnline;
@@ -213,7 +219,8 @@ class HomeScreenState extends State<HomeScreen> {
   Future<void> _autoSyncWhenOnline() async {
     try {
       debugPrint('🔄 Auto-sync triggered!');
-      final unsyncedCount = await _subscriptionService.getUnsyncedSubscriptionsCount();
+      final unsyncedCount = await _subscriptionService
+          .getUnsyncedSubscriptionsCount();
       debugPrint('🔄 Found $unsyncedCount unsynced items');
 
       if (unsyncedCount > 0) {
@@ -327,52 +334,115 @@ class HomeScreenState extends State<HomeScreen> {
 
   Future<void> _markBillAsPaid(int index) async {
     if (index < 0 || index >= _bills.length) return;
+    if (_isMarkingPaid) return;
+
+    setState(() {
+      _isMarkingPaid = true;
+    });
 
     try {
       final bill = _bills[index];
+      final billName = bill['name']?.toString() ?? 'Bill';
 
-      // Update the bill with paid status and paid date
-      final updatedBill = Map<String, dynamic>.from(bill);
-      updatedBill['status'] = 'paid';
-      updatedBill['paidDate'] = DateTime.now().toIso8601String();
-      updatedBill['lastModified'] = DateTime.now().toIso8601String();
+      // MOBILE DEBUG: Print detailed bill information
+      debugPrint('📱 MOBILE DEBUG: Attempting to mark bill as paid');
+      debugPrint('📱 Bill name: $billName');
+      debugPrint('📱 Bill ID: ${bill['id']}');
+      debugPrint('📱 Local ID: ${bill['localId']}');
+      debugPrint('📱 Firebase ID: ${bill['firebaseId']}');
+      debugPrint('📱 Current status: ${bill['status']}');
 
-      // Try to update in Firestore first
-      if (bill['firebaseId'] != null) {
-        await _subscriptionService.updateSubscription(
-          bill['firebaseId'],
-          updatedBill,
-        );
-      } else if (bill['localId'] != null) {
-        await _subscriptionService.updateSubscription(
-          bill['localId'],
-          updatedBill,
-        );
+      // CRITICAL: Save to local storage FIRST to ensure persistence
+      final localId = bill['localId'] ?? bill['id'];
+      if (localId != null) {
+        try {
+          final updatedBill = Map<String, dynamic>.from(bill);
+          updatedBill['status'] = 'paid';
+          updatedBill['paidDate'] = DateTime.now().toIso8601String();
+          updatedBill['lastModified'] = DateTime.now().toIso8601String();
+
+          await _subscriptionService.localStorageService?.updateSubscription(
+            localId,
+            updatedBill,
+          );
+          debugPrint(
+            '✅ Saved paid status to local storage for $billName (Local ID: $localId)',
+          );
+        } catch (storageError) {
+          debugPrint('❌ Failed to save to local storage: $storageError');
+          throw Exception('Failed to save bill locally: $storageError');
+        }
       }
 
-      // Update local state immediately
+      // MOBILE DEBUG: Check connectivity status
+      debugPrint('📱 MOBILE DEBUG: Checking connectivity...');
+      final online = await _subscriptionService.isOnline();
+      debugPrint('📱 MOBILE DEBUG: Online status: $online');
+
+      // THEN try to sync with Firebase
+      if (online) {
+        try {
+          final firebaseId = bill['firebaseId'];
+          debugPrint('📱 MOBILE DEBUG: Firebase ID found: $firebaseId');
+
+          if (firebaseId != null) {
+            final updatedBill = Map<String, dynamic>.from(bill);
+            updatedBill['status'] = 'paid';
+            updatedBill['paidDate'] = DateTime.now().toIso8601String();
+            updatedBill['lastModified'] = DateTime.now().toIso8601String();
+
+            debugPrint('📱 MOBILE DEBUG: Attempting Firebase update...');
+            await _subscriptionService.updateSubscription(
+              firebaseId,
+              updatedBill,
+            );
+            debugPrint('✅ Synced paid status to Firebase for $billName');
+          } else {
+            debugPrint(
+              '⚠️ No Firebase ID found for $billName - paid status saved locally only',
+            );
+          }
+        } catch (firebaseError) {
+          debugPrint(
+            '⚠️ Firebase sync failed for $billName: $firebaseError - paid status saved locally',
+          );
+        }
+      } else {
+        debugPrint('📵 Offline - paid status saved locally for $billName');
+      }
+
+      // Update UI immediately AFTER saving to local storage
+      final updatedBill = Map<String, dynamic>.from(_bills[index]);
+      updatedBill['status'] = 'paid';
+      updatedBill['paidDate'] = DateTime.now().toIso8601String();
+
       if (mounted) {
         setState(() {
           _bills[index] = updatedBill;
         });
+        debugPrint('✅ UI updated for $billName');
       }
 
       // Show success message
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Bill marked as paid successfully!'),
+          content: Text(
+            '$billName marked as paid successfully! ${online ? '(Synced to cloud)' : '(Saved locally)'}',
+          ),
           backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
       );
 
-      // Note: Removed _loadSubscriptions() call as it was overriding the paid status
-      // Local state is already updated and other sync mechanisms handle data consistency
+      debugPrint('🎉 $billName successfully marked as paid');
     } catch (e) {
-      debugPrint('Error marking bill as paid: $e');
+      debugPrint('❌ Critical error marking bill as paid: $e');
 
-      // If Firestore fails, update locally only
+      // Try to update UI even if storage fails
       try {
         final bill = _bills[index];
+        final errorBillName = bill['name']?.toString() ?? 'Bill';
         final updatedBill = Map<String, dynamic>.from(bill);
         updatedBill['status'] = 'paid';
         updatedBill['paidDate'] = DateTime.now().toIso8601String();
@@ -381,27 +451,22 @@ class HomeScreenState extends State<HomeScreen> {
           setState(() {
             _bills[index] = updatedBill;
           });
+          debugPrint('✅ UI updated despite error for $errorBillName');
         }
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Bill marked as paid locally. Will sync when online.',
-            ),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      } catch (localError) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to mark bill as paid: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+      } catch (uiError) {
+        debugPrint('❌ Even UI update failed: $uiError');
       }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error marking bill as paid: ${e.toString()}'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+      );
     }
   }
-
 
   Future<void> _updateBill(int index, Map<String, dynamic> updatedBill) async {
     if (index < 0 || index >= _bills.length) return;
@@ -441,8 +506,11 @@ class HomeScreenState extends State<HomeScreen> {
         );
       } else {
         // Create new local ID if needed
-        _bills[index]['localId'] = DateTime.now().millisecondsSinceEpoch.toString();
-        await _subscriptionService.localStorageService?.saveSubscription(_bills[index]);
+        _bills[index]['localId'] = DateTime.now().millisecondsSinceEpoch
+            .toString();
+        await _subscriptionService.localStorageService?.saveSubscription(
+          _bills[index],
+        );
       }
 
       // Update reminders
@@ -468,7 +536,9 @@ class HomeScreenState extends State<HomeScreen> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('${updatedBill['name']} saved locally. Will sync when online.'),
+              content: Text(
+                '${updatedBill['name']} saved locally. Will sync when online.',
+              ),
               backgroundColor: Colors.orange,
               behavior: SnackBarBehavior.floating,
             ),
@@ -517,6 +587,12 @@ class HomeScreenState extends State<HomeScreen> {
           );
         }
       }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isMarkingPaid = false;
+        });
+      }
     }
   }
 
@@ -558,7 +634,6 @@ class HomeScreenState extends State<HomeScreen> {
       // Don't show error to user for reminder issues, as the main update was successful
     }
   }
-
 
   // Helper method to parse due date with time
   DateTime? _parseDueDate(Map<String, dynamic> bill) {
@@ -604,7 +679,7 @@ class HomeScreenState extends State<HomeScreen> {
             minute = int.parse(timeParts[1]);
           }
         }
-      } 
+      }
 
       return DateTime(year, month, day, hour, minute);
     } catch (e) {
@@ -949,10 +1024,11 @@ class HomeScreenState extends State<HomeScreen> {
                                   : "less than last month",
                               topBoxHeight: sharedTop,
                               middleBoxHeight: sharedMiddle,
-                              bottomBoxHeight: sharedBottom,
-                              // keep This Month bottom sizes as before
-                              bottomAmountFontSize: 14,
+                              bottomBoxHeight:
+                                  sharedBottom, // same fixed height
+                              bottomAmountFontSize: 13,
                               bottomTextFontSize: 13,
+                              minBottomFontSize: 11,
                             ),
                           ),
                           const SizedBox(width: 10),
@@ -976,19 +1052,15 @@ class HomeScreenState extends State<HomeScreen> {
                               ],
                               primaryValue:
                                   "\$${_getUpcoming7DaysTotal().toStringAsFixed(2)}",
-
-                              // increase the bottom (count) size here:
                               secondaryText:
                                   "${_getUpcoming7DaysCount()} bills",
                               topBoxHeight: sharedTop,
                               middleBoxHeight: sharedMiddle,
-                              bottomBoxHeight: sharedBottom,
-                              // larger bottom fonts for emphasis
-                              bottomAmountFontSize:
-                                  20, // if you show an amount here, it'll be bigger
+                              bottomBoxHeight:
+                                  sharedBottom, // same fixed height
                               bottomTextFontSize:
-                                  22, // <-- increased size for the "X bills" text
-                              minBottomFontSize: 12,
+                                  15, // only slightly larger than 13
+                              minBottomFontSize: 11,
                             ),
                           ),
                         ],
@@ -1005,7 +1077,7 @@ class HomeScreenState extends State<HomeScreen> {
                 top: false,
                 minimum: const EdgeInsets.all(6),
                 child: RefreshIndicator(
-                  onRefresh: _loadSubscriptions,
+                  onRefresh: () async {}, // Disabled refresh functionality
                   color: Colors.white,
                   backgroundColor: Colors.transparent,
                   displacement: 40,
@@ -1591,6 +1663,8 @@ class HomeScreenState extends State<HomeScreen> {
                       if (!isPaid)
                         TextButton.icon(
                           onPressed: () async {
+                            if (_isMarkingPaid) return;
+
                             bool? confirm = await _showMarkAsPaidConfirmDialog(
                               context,
                               bill['name']?.toString() ?? 'this bill',
@@ -1599,8 +1673,30 @@ class HomeScreenState extends State<HomeScreen> {
                               await _markBillAsPaid(index);
                             }
                           },
-                          icon: const Icon(Icons.check, size: 16),
-                          label: const Text('Pay'),
+                          icon: _isMarkingPaid
+                              ? SizedBox(
+                                  width: 12,
+                                  height: 12,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.green,
+                                    ),
+                                  ),
+                                )
+                              : const Icon(Icons.check, size: 16),
+                          label: _isMarkingPaid
+                              ? const SizedBox(
+                                  width: 12,
+                                  height: 12,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.green,
+                                    ),
+                                  ),
+                                )
+                              : const Text('Pay'),
                           style: TextButton.styleFrom(
                             foregroundColor: Colors.green,
                             padding: const EdgeInsets.symmetric(
@@ -1617,21 +1713,6 @@ class HomeScreenState extends State<HomeScreen> {
                         icon: const Icon(Icons.edit, size: 16),
                         style: IconButton.styleFrom(
                           foregroundColor: Colors.blue,
-                          padding: const EdgeInsets.all(4),
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: () async {
-                          bool? confirm = await _showDeleteConfirmDialog(
-                            context,
-                          );
-                          if (confirm == true) {
-                            await _deleteSubscription(index);
-                          }
-                        },
-                        icon: const Icon(Icons.delete, size: 16),
-                        style: IconButton.styleFrom(
-                          foregroundColor: Colors.red,
                           padding: const EdgeInsets.all(4),
                         ),
                       ),
@@ -1819,7 +1900,6 @@ class HomeScreenState extends State<HomeScreen> {
     return '${date.day}/${date.month}/${date.year}';
   }
 
-  
   // Delete bill
   void _deleteBill(int billIndex) {
     if (billIndex >= 0 && billIndex < _bills.length) {
@@ -3201,107 +3281,142 @@ class HomeScreenState extends State<HomeScreen> {
                           Expanded(
                             child: ElevatedButton(
                               onPressed: () async {
-                                if (formKey.currentState!.validate()) {
-                                  // Ensure we have a time set (default to user's preferred time if not selected)
-                                  if (selectedTime == null) {
-                                    selectedTime =
-                                        await _getDefaultNotificationTime();
-                                    dueTimeController.text = selectedTime!
-                                        .format(context);
+                                if (_isAddingBill) return;
 
-                                    // Update selectedDate with default time
-                                    if (selectedDate != null) {
-                                      selectedDate = DateTime(
-                                        selectedDate!.year,
-                                        selectedDate!.month,
-                                        selectedDate!.day,
-                                        selectedTime!.hour,
-                                        selectedTime!.minute,
-                                      );
+                                setState(() {
+                                  _isAddingBill = true;
+                                });
+
+                                try {
+                                  if (formKey.currentState!.validate()) {
+                                    // Ensure we have a time set (default to user's preferred time if not selected)
+                                    if (selectedTime == null) {
+                                      selectedTime =
+                                          await _getDefaultNotificationTime();
+                                      dueTimeController.text = selectedTime!
+                                          .format(context);
+
+                                      // Update selectedDate with default time
+                                      if (selectedDate != null) {
+                                        selectedDate = DateTime(
+                                          selectedDate!.year,
+                                          selectedDate!.month,
+                                          selectedDate!.day,
+                                          selectedTime!.hour,
+                                          selectedTime!.minute,
+                                        );
+                                      }
                                     }
-                                  }
 
-                                  // Create full due date string with time
-                                  String fullDueDate = dueDateController.text;
-                                  if (selectedTime != null) {
-                                    fullDueDate +=
-                                        ' ${selectedTime!.format(context)}';
-                                  }
+                                    // Create full due date string with time
+                                    String fullDueDate = dueDateController.text;
+                                    if (selectedTime != null) {
+                                      fullDueDate +=
+                                          ' ${selectedTime!.format(context)}';
+                                    }
 
-                                  // Schedule notification if reminder time is selected
-                                  if (selectedReminderTime != null &&
-                                      selectedReminder != 'No reminder') {
-                                    // Calculate the actual reminder date based on the reminder preference
-                                    DateTime reminderDate;
-                                    if (selectedDate != null) {
-                                      reminderDate = _calculateReminderDate(
-                                        selectedDate!,
-                                        selectedReminder,
+                                    // Schedule notification if reminder time is selected
+                                    if (selectedReminderTime != null &&
+                                        selectedReminder != 'No reminder') {
+                                      // Calculate the actual reminder date based on the reminder preference
+                                      DateTime reminderDate;
+                                      if (selectedDate != null) {
+                                        reminderDate = _calculateReminderDate(
+                                          selectedDate!,
+                                          selectedReminder,
+                                        );
+                                      } else {
+                                        reminderDate = DateTime.now();
+                                      }
+
+                                      // Set the reminder time (separate from due time)
+                                      final reminderDateTime = DateTime(
+                                        reminderDate.year,
+                                        reminderDate.month,
+                                        reminderDate.day,
+                                        selectedReminderTime!.hour,
+                                        selectedReminderTime!.minute,
+                                      );
+
+                                      // Only schedule if the reminder time is in the future
+                                      if (reminderDateTime.isAfter(
+                                        DateTime.now(),
+                                      )) {
+                                        await NotificationService()
+                                            .scheduleNotification(
+                                              id:
+                                                  DateTime.now()
+                                                      .millisecondsSinceEpoch ~/
+                                                  1000,
+                                              title:
+                                                  'Bill Reminder: ${nameController.text}',
+                                              body:
+                                                  'Your bill for ${nameController.text} of ${amountController.text} is due soon!',
+                                              scheduledTime: reminderDateTime,
+                                            );
+                                      }
+                                    }
+
+                                    final subscription = {
+                                      'name': nameController.text,
+                                      'amount': amountController.text,
+                                      'dueDate': dueDateController.text,
+                                      'dueTime': dueTimeController.text,
+                                      'dueDateTime': selectedDate
+                                          ?.toIso8601String(),
+                                      'reminderTime':
+                                          selectedReminderTime != null
+                                          ? '${selectedReminderTime!.hour.toString().padLeft(2, '0')}:${selectedReminderTime!.minute.toString().padLeft(2, '0')}'
+                                          : null,
+                                      'frequency': selectedFrequency,
+                                      'reminder': selectedReminder,
+                                      'category': selectedCategory.id,
+                                      'categoryName': selectedCategory.name,
+                                      'categoryColor': selectedCategory.color
+                                          .toARGB32(),
+                                      'categoryBackgroundColor':
+                                          selectedCategory.backgroundColor
+                                              .toARGB32(),
+                                      'notes': notesController.text.isEmpty
+                                          ? null
+                                          : notesController.text,
+                                    };
+                                    if (isEditMode &&
+                                        currentEditIndex != null) {
+                                      await _updateBill(
+                                        currentEditIndex,
+                                        subscription,
                                       );
                                     } else {
-                                      reminderDate = DateTime.now();
+                                      await _addSubscription(subscription);
                                     }
-
-                                    // Set the reminder time (separate from due time)
-                                    final reminderDateTime = DateTime(
-                                      reminderDate.year,
-                                      reminderDate.month,
-                                      reminderDate.day,
-                                      selectedReminderTime!.hour,
-                                      selectedReminderTime!.minute,
-                                    );
-
-                                    // Only schedule if the reminder time is in the future
-                                    if (reminderDateTime.isAfter(
-                                      DateTime.now(),
-                                    )) {
-                                      await NotificationService().scheduleNotification(
-                                        id:
-                                            DateTime.now()
-                                                .millisecondsSinceEpoch ~/
-                                            1000,
-                                        title:
-                                            'Bill Reminder: ${nameController.text}',
-                                        body:
-                                            'Your bill for ${nameController.text} of ${amountController.text} is due soon!',
-                                        scheduledTime: reminderDateTime,
-                                      );
+                                    if (mounted) {
+                                      Navigator.pop(context);
                                     }
                                   }
-
-                                  final subscription = {
-                                    'name': nameController.text,
-                                    'amount': amountController.text,
-                                    'dueDate': dueDateController.text,
-                                    'dueTime': dueTimeController.text,
-                                    'dueDateTime': selectedDate
-                                        ?.toIso8601String(),
-                                    'reminderTime': selectedReminderTime != null
-                                        ? '${selectedReminderTime!.hour.toString().padLeft(2, '0')}:${selectedReminderTime!.minute.toString().padLeft(2, '0')}'
-                                        : null,
-                                    'frequency': selectedFrequency,
-                                    'reminder': selectedReminder,
-                                    'category': selectedCategory.id,
-                                    'categoryName': selectedCategory.name,
-                                    'categoryColor': selectedCategory.color
-                                        .toARGB32(),
-                                    'categoryBackgroundColor': selectedCategory
-                                        .backgroundColor
-                                        .toARGB32(),
-                                    'notes': notesController.text.isEmpty
-                                        ? null
-                                        : notesController.text,
-                                  };
-                                  if (isEditMode && currentEditIndex != null) {
-                                    await _updateBill(
-                                      currentEditIndex,
-                                      subscription,
-                                    );
-                                  } else {
-                                    await _addSubscription(subscription);
-                                  }
+                                } catch (e) {
+                                  debugPrint('Error adding bill: $e');
                                   if (mounted) {
-                                    Navigator.pop(context);
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          'Error adding bill: ${e.toString()}',
+                                        ),
+                                        backgroundColor: Colors.red,
+                                        behavior: SnackBarBehavior.floating,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                } finally {
+                                  if (mounted) {
+                                    setState(() {
+                                      _isAddingBill = false;
+                                    });
                                   }
                                 }
                               },
@@ -3315,10 +3430,22 @@ class HomeScreenState extends State<HomeScreen> {
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                               ),
-                              child: Text(
-                                isEditMode ? 'Edit Bill' : 'Add Bill',
-                                style: TextStyle(fontSize: 14),
-                              ),
+                              child: _isAddingBill
+                                  ? SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor:
+                                            AlwaysStoppedAnimation<Color>(
+                                              Colors.white,
+                                            ),
+                                      ),
+                                    )
+                                  : Text(
+                                      isEditMode ? 'Edit Bill' : 'Add Bill',
+                                      style: TextStyle(fontSize: 14),
+                                    ),
                             ),
                           ),
                         ],
@@ -3520,16 +3647,25 @@ class HomeScreenState extends State<HomeScreen> {
                 mergedBill['status'] = 'paid';
                 mergedBill['paidDate'] = localBill['paidDate'];
                 needsUpdate = true;
-                debugPrint('🔄 Preserving paid status for: ${syncedBill['name']}');
+                debugPrint(
+                  '🔄 Preserving paid status for: ${syncedBill['name']}',
+                );
               }
 
               // Check for other local changes that should be preserved
               // (like recent edits that haven't synced yet)
-              if (localBill.containsKey('lastModified') && syncedBill.containsKey('lastModified')) {
-                final localModified = DateTime.tryParse(localBill['lastModified'].toString());
-                final syncedModified = DateTime.tryParse(syncedBill['lastModified'].toString());
+              if (localBill.containsKey('lastModified') &&
+                  syncedBill.containsKey('lastModified')) {
+                final localModified = DateTime.tryParse(
+                  localBill['lastModified'].toString(),
+                );
+                final syncedModified = DateTime.tryParse(
+                  syncedBill['lastModified'].toString(),
+                );
 
-                if (localModified != null && syncedModified != null && localModified.isAfter(syncedModified)) {
+                if (localModified != null &&
+                    syncedModified != null &&
+                    localModified.isAfter(syncedModified)) {
                   // Local version is newer, preserve more fields
                   for (var key in localBill.keys) {
                     if (!['id', 'firebaseId', 'localId'].contains(key)) {
@@ -3537,7 +3673,9 @@ class HomeScreenState extends State<HomeScreen> {
                     }
                   }
                   needsUpdate = true;
-                  debugPrint('🔄 Preserving newer local version for: ${syncedBill['name']}');
+                  debugPrint(
+                    '🔄 Preserving newer local version for: ${syncedBill['name']}',
+                  );
                 }
               }
 
@@ -3615,52 +3753,86 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _deleteSubscription(int index) async {
+    if (index < 0 || index >= _bills.length) return;
+
     final subscription = _bills[index];
+    final subscriptionName = subscription['name'] ?? 'Unknown Bill';
 
-    // Check network status first
-    await _checkConnectivity();
+    // Show loading indicator
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Deleting bill...'),
+          backgroundColor: Colors.blue,
+          duration: Duration(seconds: 1),
+        ),
+      );
+    }
 
-    if (_isOnline) {
-      try {
-        // Try to delete from Firebase
-        if (subscription['firebaseId'] != null) {
-          await _subscriptionService.deleteSubscription(
-            subscription['firebaseId'],
-          );
-        } else if (subscription['localId'] != null) {
-          await _subscriptionService.deleteSubscription(
-            subscription['localId'],
-          );
+    try {
+      // CRITICAL: Delete from local storage FIRST for immediate response
+      final localId = subscription['localId'] ?? subscription['id'];
+      if (localId != null) {
+        try {
+          await _subscriptionService.localStorageService?.deleteSubscription(localId);
+          debugPrint('✅ Deleted from local storage for $subscriptionName (ID: $localId)');
+        } catch (storageError) {
+          debugPrint('❌ Failed to delete from local storage: $storageError');
+          throw Exception('Failed to delete bill locally: $storageError');
         }
+      }
 
-        // Remove from local list immediately instead of full reload
-        if (mounted) {
-          setState(() {
-            _bills.removeAt(index);
-          });
-        }
+      // Check network status for Firebase deletion
+      await _checkConnectivity();
 
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('${subscription['name']} deleted successfully!'),
-              backgroundColor: Colors.green,
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
+      if (_isOnline) {
+        try {
+          // Try to delete from Firebase
+          final firebaseId = subscription['firebaseId'] ?? subscription['id'];
+          if (firebaseId != null && (firebaseId.startsWith('sub_') || firebaseId.length > 20)) {
+            debugPrint('🌐 Online, deleting from Firebase: $subscriptionName (ID: $firebaseId)');
+            await _subscriptionService.deleteSubscription(firebaseId);
+            debugPrint('✅ Deleted from Firebase for $subscriptionName');
+          }
+
+          // Show success message
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('$subscriptionName deleted successfully!'),
+                backgroundColor: Colors.green,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
-            ),
-          );
+            );
+          }
+        } catch (firebaseError) {
+          debugPrint('⚠️ Firebase delete failed for $subscriptionName: $firebaseError');
+
+          // Still show success since local deletion worked
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('$subscriptionName deleted locally. Will sync when online.'),
+                backgroundColor: Colors.orange,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            );
+          }
         }
-      } catch (e) {
-        // If Firebase fails, just remove from local list
+      } else {
+        debugPrint('📵 Offline - deleted locally only for $subscriptionName');
+
+        // Show offline message
         if (mounted) {
-          setState(() {
-            _bills.removeAt(index);
-          });
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('${subscription['name']} deleted locally.'),
+              content: Text('$subscriptionName deleted locally. Will sync when online.'),
               backgroundColor: Colors.orange,
               behavior: SnackBarBehavior.floating,
               shape: RoundedRectangleBorder(
@@ -3670,16 +3842,34 @@ class HomeScreenState extends State<HomeScreen> {
           );
         }
       }
-    } else {
-      // Offline: Just remove from local list
+
+      // Remove from UI list after successful operations
       if (mounted) {
         setState(() {
           _bills.removeAt(index);
         });
+      }
+
+      // Cancel any existing notifications for this bill
+      try {
+        final notificationService = NotificationService();
+        if (subscription['id'] != null) {
+          await notificationService.cancelNotification(
+            int.tryParse(subscription['id'].toString()) ?? 0,
+          );
+        }
+      } catch (e) {
+        debugPrint('Error canceling notification: $e');
+      }
+
+    } catch (e) {
+      debugPrint('❌ Error deleting bill $subscriptionName: $e');
+
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('${subscription['name']} deleted locally.'),
-            backgroundColor: Colors.orange,
+            content: Text('Failed to delete $subscriptionName: ${e.toString()}'),
+            backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8),

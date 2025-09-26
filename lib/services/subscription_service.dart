@@ -128,10 +128,16 @@ class SubscriptionService {
     }
   }
 
-  // Update a subscription
+  // Update a subscription with MOBILE debugging
   Future<void> updateSubscription(String id, Map<String, dynamic> subscription) async {
     try {
       subscription['updatedAt'] = FieldValue.serverTimestamp();
+
+      // MOBILE DEBUG: Print detailed information
+      debugPrint('📱 MOBILE DEBUG: Updating subscription');
+      debugPrint('📱 MOBILE DEBUG: Input ID: $id');
+      debugPrint('📱 MOBILE DEBUG: ID type: ${id.startsWith('sub_') || id.length > 20 ? 'Firebase ID' : 'Local ID'}');
+      debugPrint('📱 MOBILE DEBUG: Subscription keys: ${subscription.keys.toList()}');
 
       // Determine if this is a Firebase ID or local ID
       String? firebaseId;
@@ -140,8 +146,10 @@ class SubscriptionService {
       if (id.startsWith('sub_') || id.length > 20) {
         // Likely a Firebase ID
         firebaseId = id;
+        debugPrint('📱 MOBILE DEBUG: Identified as Firebase ID: $firebaseId');
       } else {
         // Likely a local ID, need to find the corresponding Firebase ID
+        debugPrint('📱 MOBILE DEBUG: Looking up Firebase ID for local ID: $id');
         final subscriptions = await _localStorageService?.getSubscriptions();
         final localSub = subscriptions?.firstWhere(
           (sub) => sub['localId'] == id || sub['id'] == id,
@@ -149,28 +157,50 @@ class SubscriptionService {
         );
         firebaseId = localSub?['firebaseId'];
         localId = localSub?['localId'] ?? id;
+        debugPrint('📱 MOBILE DEBUG: Found Firebase ID: $firebaseId, Local ID: $localId');
       }
 
       // Try Firebase first if we have a Firebase ID
       if (firebaseId != null) {
-        await _subscriptionsCollection.doc(firebaseId).update(subscription);
-        debugPrint('✅ Updated subscription in Firebase with ID: $firebaseId');
+        try {
+          debugPrint('📱 MOBILE DEBUG: Attempting Firebase update with ID: $firebaseId');
+          await _subscriptionsCollection.doc(firebaseId).update(subscription);
+          debugPrint('✅ Updated subscription in Firebase with ID: $firebaseId');
+        } catch (firebaseError) {
+          debugPrint('📱 MOBILE DEBUG: Firebase update failed: $firebaseError');
+          throw firebaseError;
+        }
       }
 
       // Always update locally with the correct local ID
       if (localId != null) {
-        await _localStorageService?.updateSubscription(localId, subscription);
-        debugPrint('✅ Updated subscription in local storage with ID: $localId');
+        try {
+          debugPrint('📱 MOBILE DEBUG: Updating local storage with ID: $localId');
+          await _localStorageService?.updateSubscription(localId, subscription);
+          debugPrint('✅ Updated subscription in local storage with ID: $localId');
+        } catch (localError) {
+          debugPrint('📱 MOBILE DEBUG: Local storage update failed: $localError');
+        }
       } else if (firebaseId == null) {
         // If no Firebase ID, use the original ID for local storage
-        await _localStorageService?.updateSubscription(id, subscription);
-        debugPrint('✅ Updated subscription in local storage with original ID: $id');
+        try {
+          debugPrint('📱 MOBILE DEBUG: Updating local storage with original ID: $id');
+          await _localStorageService?.updateSubscription(id, subscription);
+          debugPrint('✅ Updated subscription in local storage with original ID: $id');
+        } catch (localError) {
+          debugPrint('📱 MOBILE DEBUG: Local storage update failed: $localError');
+        }
       }
 
     } catch (e) {
       // If Firebase fails, update locally only
-      debugPrint('Firebase update failed: $e. Updating locally only.');
-      await _localStorageService?.updateSubscription(id, subscription);
+      debugPrint('📱 MOBILE DEBUG: Firebase update failed: $e. Updating locally only.');
+      try {
+        await _localStorageService?.updateSubscription(id, subscription);
+        debugPrint('📱 MOBILE DEBUG: Successfully updated locally after Firebase failure');
+      } catch (localError) {
+        debugPrint('📱 MOBILE DEBUG: Local update also failed: $localError');
+      }
       throw Exception('Offline mode: Updated locally. Will sync when online.');
     }
   }
@@ -255,18 +285,20 @@ class SubscriptionService {
     }
   }
 
-  // Check if user is online with enhanced connectivity detection
+  // Check if user is online with MOBILE-FRIENDLY connectivity detection
   Future<bool> isOnline() async {
     try {
       // First check basic network connectivity
       final connectivityResult = await Connectivity().checkConnectivity();
+      debugPrint('📱 MOBILE DEBUG: Connectivity result: $connectivityResult');
+
       if (connectivityResult == ConnectivityResult.none) {
-        debugPrint('No network connectivity detected');
+        debugPrint('📱 MOBILE DEBUG: No network connectivity detected');
         return false;
       }
 
-      // Then check actual internet connectivity with a more reliable approach
-      final timeout = const Duration(seconds: 2); // Reduced timeout for faster response
+      // MOBILE FRIENDLY: Use longer timeout for mobile networks
+      final timeout = const Duration(seconds: 5); // Increased timeout for mobile
 
       // Try 1: Quick auth check (fastest)
       try {
@@ -277,7 +309,7 @@ class SubscriptionService {
           return true;
         }
       } catch (e) {
-        debugPrint('Auth connectivity test failed: $e');
+        debugPrint('📱 MOBILE DEBUG: Auth connectivity test failed: $e');
       }
 
       // Try 2: Lightweight Firebase operation
@@ -286,11 +318,25 @@ class SubscriptionService {
         debugPrint('✅ Firebase connectivity confirmed');
         return true;
       } catch (e) {
-        debugPrint('Firebase connectivity test failed: $e');
+        debugPrint('📱 MOBILE DEBUG: Firebase connectivity test failed: $e');
+
+        // MOBILE FRIENDLY: Try alternative connectivity check
+        try {
+          // Try a different approach - check if we can reach Firebase auth
+          final user = _auth.currentUser;
+          if (user != null) {
+            // Just check if user exists (no network call)
+            debugPrint('✅ Basic auth check passed - assuming online');
+            return true;
+          }
+        } catch (authCheckError) {
+          debugPrint('📱 MOBILE DEBUG: Basic auth check failed: $authCheckError');
+        }
+
         return false;
       }
     } catch (e) {
-      debugPrint('Network check failed: $e');
+      debugPrint('📱 MOBILE DEBUG: Network check failed: $e');
       return false;
     }
   }
