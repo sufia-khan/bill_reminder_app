@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:projeckt_k/services/notification_service.dart';
+import 'package:projeckt_k/services/local_storage_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({Key? key}) : super(key: key);
@@ -429,34 +432,109 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  void _showClearDataConfirm() {
-    showDialog(
+  Future<void> _showClearDataConfirm() async {
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Clear All Data?'),
-        content: const Text('This action cannot be undone. All your bills and settings will be permanently deleted.'),
+        content: const Text('This action cannot be undone. All your bills and settings will be permanently deleted from both your device and the cloud.'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(context, false),
             child: const Text('Cancel'),
           ),
           TextButton(
-            onPressed: () {
-              // Placeholder for clear data functionality
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Data cleared successfully'),
-                  backgroundColor: Colors.green,
-                ),
-              );
-            },
+            onPressed: () => Navigator.pop(context, true),
             style: TextButton.styleFrom(foregroundColor: Colors.red),
             child: const Text('Clear Data'),
           ),
         ],
       ),
     );
+
+    if (confirmed == true) {
+      await _clearAllData();
+    }
+  }
+
+  Future<void> _clearAllData() async {
+    try {
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const AlertDialog(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('Clearing all data...'),
+            ],
+          ),
+        ),
+      );
+
+      // Cancel all notifications first
+      final notificationService = NotificationService();
+      await notificationService.cancelAllNotifications();
+
+      // Clear local storage
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.clear();
+
+      // Clear Firebase data
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        try {
+          // Delete all subscriptions from Firestore
+          final subscriptionsRef = FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .collection('subscriptions');
+
+          final snapshot = await subscriptionsRef.get();
+          for (final doc in snapshot.docs) {
+            await doc.reference.delete();
+          }
+        } catch (e) {
+          debugPrint('Error clearing Firebase data: $e');
+        }
+      }
+
+      // Hide loading indicator
+      Navigator.pop(context);
+
+      // Show success message
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('All data cleared successfully'),
+          backgroundColor: Colors.green,
+        ),
+      );
+
+      // Reset app state
+      setState(() {
+        _notificationsEnabled = true;
+        _darkMode = false;
+        _currency = 'USD';
+        _reminderTime = '09:00';
+      });
+
+    } catch (e) {
+      // Hide loading indicator if showing
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+
+      // Show error message
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error clearing data: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   void _showDefaultCategorySelector() {

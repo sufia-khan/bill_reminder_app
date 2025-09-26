@@ -14,23 +14,27 @@ class BillSummaryCard extends StatelessWidget {
     this.secondaryAmount,
     this.secondaryText,
 
-    // ↓ More compact (extra -15%)
+    // Box section heights
     this.topBoxHeight = 2,
-    this.middleBoxHeight = 17, // reduced from 18
-    this.bottomBoxHeight = 9, // reduced from 10
+    this.middleBoxHeight = 17,
+    this.bottomBoxHeight = 9,
+
     // Font sizes
-    this.primaryFontSize = 24, // keep mid value same
+    this.primaryFontSize = 24,
     this.minPrimaryFontSize = 10,
-    this.bottomAmountFontSize = 7, // reduced from 8 (defaults)
-    this.bottomTextFontSize = 7, // reduced from 8
-    this.minBottomFontSize = 6, // reduced from 7
+    this.bottomAmountFontSize = 7,
+    this.bottomTextFontSize = 7,
+    this.minBottomFontSize = 6,
 
     this.innerPadding = const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
 
-    // ↓ Icon smaller
+    // Icon configs
     this.iconSize = 18,
     this.iconOnRight = false,
     this.textIconGap = 6,
+
+    // NEW → extra boost for bottom box only
+    this.bottomHeightBoost = 6,
   }) : assert(gradientColors.length >= 2),
        super(key: key);
 
@@ -40,6 +44,7 @@ class BillSummaryCard extends StatelessWidget {
   final String primaryValue;
   final String? secondaryAmount;
   final String? secondaryText;
+
   final double topBoxHeight;
   final double middleBoxHeight;
   final double bottomBoxHeight;
@@ -54,6 +59,8 @@ class BillSummaryCard extends StatelessWidget {
   final double iconSize;
   final bool iconOnRight;
   final double textIconGap;
+
+  final double bottomHeightBoost; // new field
 
   // ----------------------
   Widget _topRow() {
@@ -93,10 +100,9 @@ class BillSummaryCard extends StatelessWidget {
     final hasText = (secondaryText?.trim().isNotEmpty ?? false);
 
     if (hasAmount && hasText) {
-      // Two-line bottom - more compact to prevent overflow
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min, // Use min size to prevent overflow
+        mainAxisSize: MainAxisSize.min,
         children: [
           AutoSizeText(
             secondaryAmount!,
@@ -110,7 +116,6 @@ class BillSummaryCard extends StatelessWidget {
             minFontSize: minBottomFontSize,
             overflow: TextOverflow.ellipsis,
           ),
-          // Removed spacing between lines to save space
           AutoSizeText(
             secondaryText!,
             textAlign: TextAlign.left,
@@ -127,7 +132,6 @@ class BillSummaryCard extends StatelessWidget {
       );
     }
 
-    // Single line present
     final single = (hasAmount
         ? secondaryAmount!
         : (hasText ? secondaryText! : ''));
@@ -150,20 +154,14 @@ class BillSummaryCard extends StatelessWidget {
     );
   }
 
-  // --- replace (or update) the build() method portion in your file with this version ---
   @override
   Widget build(BuildContext context) {
-    // keep the compact netScale but compute required bottom height from actual fonts
-    const double netScale = 0.85 * 0.85; // 0.7225 - your compact scale
+    const double netScale = 0.85 * 0.85; // compact scaling
 
-    // scaled section heights
     final double topH = topBoxHeight * netScale;
     final double midH = middleBoxHeight * netScale;
-
-    // base bottom height scaled
     final double baseBottomH = bottomBoxHeight * netScale;
 
-    // scale inner padding
     final EdgeInsets scaledInnerPadding = EdgeInsets.fromLTRB(
       innerPadding.left * netScale,
       innerPadding.top * netScale,
@@ -180,13 +178,10 @@ class BillSummaryCard extends StatelessWidget {
     );
     final EdgeInsets finalInnerPadding = EdgeInsets.all(perSidePad);
 
-    // --- compute minimum required bottom height from actual bottom font sizes ---
     final bool hasAmount = (secondaryAmount?.trim().isNotEmpty ?? false);
     final bool hasText = (secondaryText?.trim().isNotEmpty ?? false);
 
-    // conservative line height multiplier
     const double lineHeightFactor = 1.25;
-
     double requiredBottomH;
     if (hasAmount && hasText) {
       requiredBottomH =
@@ -200,14 +195,12 @@ class BillSummaryCard extends StatelessWidget {
       requiredBottomH = 0.0;
     }
 
-    // final bottom height = max(scaled base, required)
     double bottomH = math.max(baseBottomH, requiredBottomH);
 
-    // --- SAFETY BUFFER: add a few pixels to avoid tiny fractional overflows ---
+    // 🔹 add boost only to bottom box
+    bottomH += bottomHeightBoost;
+
     const double safeBuffer = 3.0;
-    // apply small extra to bottom region so layout won't clip due to sub-pixel rounding
-    bottomH =
-        bottomH + (safeBuffer * 0.4); // add part to bottom area (optional)
     final double totalHeight =
         topH +
         midH +
@@ -242,7 +235,6 @@ class BillSummaryCard extends StatelessWidget {
               ),
             ),
           ),
-          // bottom — give it flexible room computed above
           SizedBox(
             height: bottomH,
             child: LayoutBuilder(

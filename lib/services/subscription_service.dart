@@ -22,6 +22,9 @@ class SubscriptionService {
   CollectionReference get _subscriptionsCollection =>
       _firestore.collection('users').doc(_auth.currentUser?.uid).collection('subscriptions');
 
+  // Get local storage service for direct access
+  LocalStorageService? get localStorageService => _localStorageService;
+
   // Add a new subscription with offline support - OPTIMIZED for cross-device access
   Future<void> addSubscription(Map<String, dynamic> subscription) async {
     // ALWAYS save locally first (immediate UI response)
@@ -130,11 +133,39 @@ class SubscriptionService {
     try {
       subscription['updatedAt'] = FieldValue.serverTimestamp();
 
-      // Try Firebase first
-      await _subscriptionsCollection.doc(id).update(subscription);
+      // Determine if this is a Firebase ID or local ID
+      String? firebaseId;
+      String? localId;
 
-      // Update locally
-      await _localStorageService?.updateSubscription(id, subscription);
+      if (id.startsWith('sub_') || id.length > 20) {
+        // Likely a Firebase ID
+        firebaseId = id;
+      } else {
+        // Likely a local ID, need to find the corresponding Firebase ID
+        final subscriptions = await _localStorageService?.getSubscriptions();
+        final localSub = subscriptions?.firstWhere(
+          (sub) => sub['localId'] == id || sub['id'] == id,
+          orElse: () => {},
+        );
+        firebaseId = localSub?['firebaseId'];
+        localId = localSub?['localId'] ?? id;
+      }
+
+      // Try Firebase first if we have a Firebase ID
+      if (firebaseId != null) {
+        await _subscriptionsCollection.doc(firebaseId).update(subscription);
+        debugPrint('✅ Updated subscription in Firebase with ID: $firebaseId');
+      }
+
+      // Always update locally with the correct local ID
+      if (localId != null) {
+        await _localStorageService?.updateSubscription(localId, subscription);
+        debugPrint('✅ Updated subscription in local storage with ID: $localId');
+      } else if (firebaseId == null) {
+        // If no Firebase ID, use the original ID for local storage
+        await _localStorageService?.updateSubscription(id, subscription);
+        debugPrint('✅ Updated subscription in local storage with original ID: $id');
+      }
 
     } catch (e) {
       // If Firebase fails, update locally only
