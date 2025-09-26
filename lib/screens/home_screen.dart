@@ -39,12 +39,6 @@ class HomeScreenState extends State<HomeScreen> {
   String selectedCategory = 'all'; // 'all' or specific category id
   String selectedStatus = 'upcoming'; // 'upcoming', 'overdue', 'paid'
   final ScrollController _categoryScrollController = ScrollController();
-  // shared sizes
-  // shared sizes
-  double sharedTop = 36;
-  double sharedMiddle = 70;
-  double sharedBottom = 45;
-
   // base sizes for "This Month"
   double baseBottomAmountFontSize = 14;
   double baseBottomTextFontSize = 13;
@@ -73,7 +67,7 @@ class HomeScreenState extends State<HomeScreen> {
     notificationService.onMarkAsPaid = (String? billId) {
       debugPrint('📝 Mark as paid callback received for bill ID: $billId');
       if (billId != null) {
-        _markBillAsPaidFromNotification(billId!);
+        _markBillAsPaidFromNotification(billId);
       }
     };
   }
@@ -177,7 +171,7 @@ class HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Mark bill as paid from notification action
+  // Mark bill as paid (for notification action)
   void _markBillAsPaidFromNotification(String billId) {
     debugPrint('📝 Marking bill as paid from notification: $billId');
 
@@ -233,7 +227,8 @@ class HomeScreenState extends State<HomeScreen> {
                 duration: const Duration(seconds: 2),
               ),
             );
-            await _loadSubscriptions(); // Refresh the list
+            // Note: Removed _loadSubscriptions() call to prevent overriding paid status changes
+            // Local state is already updated via setState() above
           }
         }
       } else {
@@ -375,15 +370,22 @@ class HomeScreenState extends State<HomeScreen> {
                       itemCount: filteredBills.length,
                       itemBuilder: (context, index) {
                         final bill = filteredBills[index];
+                        // Find the original index in _bills for proper editing/deletion
+                        final originalIndex = _bills.indexWhere(
+                          (b) =>
+                              b['id'] == bill['id'] ||
+                              b['firebaseId'] == bill['firebaseId'] ||
+                              b['localId'] == bill['localId'],
+                        );
                         return BillItemWidget(
-                          bill: {...bill, 'index': index},
+                          bill: {...bill, 'index': originalIndex},
                           onMarkAsPaid: (billIndex) async {
                             bool? confirm = await _showMarkAsPaidConfirmDialog(
                               context,
                               bill['name'] ?? 'this bill',
                             );
                             if (confirm == true) {
-                              await _markBillAsPaid(billIndex);
+                              await _markBillAsPaid(originalIndex);
                               _loadSubscriptions();
                             }
                           },
@@ -392,7 +394,7 @@ class HomeScreenState extends State<HomeScreen> {
                               context,
                             );
                             if (confirm == true) {
-                              await _deleteSubscription(billIndex);
+                              await _deleteSubscription(originalIndex);
                               _loadSubscriptions();
                             }
                           },
@@ -512,8 +514,8 @@ class HomeScreenState extends State<HomeScreen> {
         ),
       );
 
-      // Refresh data to update all statistics
-      await _loadSubscriptions();
+      // Note: Removed _loadSubscriptions() call as it was overriding the paid status
+      // Local state is already updated and other sync mechanisms handle data consistency
     } catch (e) {
       debugPrint('Error marking bill as paid: $e');
 
@@ -1978,7 +1980,10 @@ class HomeScreenState extends State<HomeScreen> {
     // Debug: Print available categories and selected category
     debugPrint('🔍 Selected category: "$selectedCategory"');
     debugPrint('🔍 Available categories in bills:');
-    final availableCategories = _bills.map((bill) => bill['category']?.toString()).where((cat) => cat != null).toSet();
+    final availableCategories = _bills
+        .map((bill) => bill['category']?.toString())
+        .where((cat) => cat != null)
+        .toSet();
     debugPrint('  - Categories found: $availableCategories');
 
     for (var bill in _bills) {
@@ -1991,15 +1996,15 @@ class HomeScreenState extends State<HomeScreen> {
 
         // Debug status for specific bill that matches category
         if (bill['name'] == 'health health ') {
-          debugPrint('🔍 Status debug - Bill: "${bill['name']}", Status: "$billStatus", DueDate: $dueDate, SelectedStatus: "$selectedStatus"');
+          debugPrint(
+            '🔍 Status debug - Bill: "${bill['name']}", Status: "$billStatus", DueDate: $dueDate, SelectedStatus: "$selectedStatus"',
+          );
         }
 
         switch (selectedStatus) {
           case 'all':
             // Show reminders for upcoming bills (unpaid bills with due dates)
-            matchesStatus =
-                billStatus != 'paid' &&
-                dueDate != null;
+            matchesStatus = billStatus != 'paid' && dueDate != null;
             break;
           case 'upcoming':
             matchesStatus =
@@ -2033,14 +2038,18 @@ class HomeScreenState extends State<HomeScreen> {
           } else {
             final exactMatch = billCategory == selectedCategory;
             final containsMatch = billCategory.contains(selectedCategory);
-            final caseInsensitiveMatch = billCategory.toLowerCase() == selectedCategory.toLowerCase();
+            final caseInsensitiveMatch =
+                billCategory.toLowerCase() == selectedCategory.toLowerCase();
 
-            matchesCategory = exactMatch || containsMatch || caseInsensitiveMatch;
+            matchesCategory =
+                exactMatch || containsMatch || caseInsensitiveMatch;
           }
 
           // Debug: Print first few matching attempts
           if (filteredBills.length < 2) {
-            debugPrint('🔍 Category check - Bill: "${bill['name']}", Category: "$billCategory", Selected: "$selectedCategory", Match: $matchesCategory');
+            debugPrint(
+              '🔍 Category check - Bill: "${bill['name']}", Category: "$billCategory", Selected: "$selectedCategory", Match: $matchesCategory',
+            );
           }
         }
 
@@ -2048,11 +2057,15 @@ class HomeScreenState extends State<HomeScreen> {
         if (matchesStatus && matchesCategory) {
           filteredBills.add(bill);
           if (bill['name'] == 'health health ') {
-            debugPrint('🔍 Bill "${bill['name']}" ADDED - Status: $matchesStatus, Category: $matchesCategory');
+            debugPrint(
+              '🔍 Bill "${bill['name']}" ADDED - Status: $matchesStatus, Category: $matchesCategory',
+            );
           }
         } else if (matchesCategory) {
           if (bill['name'] == 'health health ') {
-            debugPrint('🔍 Bill "${bill['name']}" FILTERED OUT - Status: $matchesStatus, Category: $matchesCategory');
+            debugPrint(
+              '🔍 Bill "${bill['name']}" FILTERED OUT - Status: $matchesStatus, Category: $matchesCategory',
+            );
           }
         }
       } catch (e) {
@@ -4217,17 +4230,45 @@ class HomeScreenState extends State<HomeScreen> {
           final syncedSubscriptions = await _subscriptionService
               .getSubscriptions();
 
-          // Only update UI if data actually changed
-          if (mounted &&
-              syncedSubscriptions.length != localSubscriptions.length) {
-            setState(() {
-              _bills = syncedSubscriptions;
-            });
-            debugPrint(
-              '🔄 UI updated with synced data: ${_bills.length} bills',
-            );
-          } else {
-            debugPrint('✅ No changes needed from sync');
+          // Smart merge: preserve local paid status changes while syncing other data
+          if (mounted) {
+            bool needsUpdate = false;
+            final List<Map<String, dynamic>> mergedBills = [];
+
+            for (var syncedBill in syncedSubscriptions) {
+              final localBill = _bills.firstWhere(
+                (b) =>
+                    b['id'] == syncedBill['id'] ||
+                    b['firebaseId'] == syncedBill['firebaseId'] ||
+                    b['localId'] == syncedBill['localId'],
+                orElse: () => syncedBill,
+              );
+
+              // Preserve local paid status and paid date
+              if (localBill['status'] == 'paid' && syncedBill['status'] != 'paid') {
+                // Keep the local paid status
+                mergedBills.add({
+                  ...syncedBill,
+                  'status': 'paid',
+                  'paidDate': localBill['paidDate'],
+                });
+                needsUpdate = true;
+              } else {
+                mergedBills.add(syncedBill);
+              }
+            }
+
+            // Only update if there are actual changes
+            if (needsUpdate || mergedBills.length != _bills.length) {
+              setState(() {
+                _bills = mergedBills;
+              });
+              debugPrint(
+                '🔄 UI updated with merged data: ${_bills.length} bills (preserved local paid status)',
+              );
+            } else {
+              debugPrint('✅ No changes needed from sync');
+            }
           }
         } catch (e) {
           debugPrint(
@@ -4256,7 +4297,8 @@ class HomeScreenState extends State<HomeScreen> {
       );
 
       await _subscriptionService.addSubscription(convertedSubscription);
-      await _loadSubscriptions(); // Refresh the list
+      // Note: Removed _loadSubscriptions() call to prevent overriding paid status changes
+      // The add operation should automatically update the local state
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

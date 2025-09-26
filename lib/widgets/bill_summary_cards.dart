@@ -14,20 +14,20 @@ class BillSummaryCard extends StatelessWidget {
     this.secondaryAmount,
     this.secondaryText,
 
-    // ↓ More compact (extra -10%)
+    // ↓ More compact (extra -15%)
     this.topBoxHeight = 2,
-    this.middleBoxHeight = 18, // was 20 → -10%
-    this.bottomBoxHeight = 10, // was 11 → -10%
+    this.middleBoxHeight = 17, // reduced from 18
+    this.bottomBoxHeight = 9, // reduced from 10
     // Font sizes
     this.primaryFontSize = 24, // keep mid value same
     this.minPrimaryFontSize = 10,
-    this.bottomAmountFontSize = 8,
-    this.bottomTextFontSize = 8,
-    this.minBottomFontSize = 7,
+    this.bottomAmountFontSize = 7, // reduced from 8 (defaults)
+    this.bottomTextFontSize = 7, // reduced from 8
+    this.minBottomFontSize = 6, // reduced from 7
 
     this.innerPadding = const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
 
-    // ↓ Icon smaller (used in _topRow via constant 25.0 previously)
+    // ↓ Icon smaller
     this.iconSize = 18,
     this.iconOnRight = false,
     this.textIconGap = 6,
@@ -57,11 +57,7 @@ class BillSummaryCard extends StatelessWidget {
 
   // ----------------------
   Widget _topRow() {
-    final iconWidget = Icon(
-      icon,
-      color: Colors.white,
-      size: 25.0, // kept same visual weight as before
-    );
+    final iconWidget = Icon(icon, color: Colors.white, size: 25.0);
 
     final titleWidget = Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -91,19 +87,17 @@ class BillSummaryCard extends StatelessWidget {
     );
   }
 
-  /// Bottom widget: If both secondaryAmount & secondaryText present -> always two lines.
-  /// If only one present -> single line left-aligned and vertically centered within the outer bottom box.
+  /// Bottom widget
   Widget _buildBottom(double widthAvailable) {
     final hasAmount = (secondaryAmount?.trim().isNotEmpty ?? false);
     final hasText = (secondaryText?.trim().isNotEmpty ?? false);
 
     if (hasAmount && hasText) {
-      // Two-line bottom: amount (bold) then descriptor (regular).
+      // Two-line bottom - more compact to prevent overflow
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min, // Use min size to prevent overflow
         children: [
-          // Amount line - bold
           AutoSizeText(
             secondaryAmount!,
             textAlign: TextAlign.left,
@@ -116,8 +110,7 @@ class BillSummaryCard extends StatelessWidget {
             minFontSize: minBottomFontSize,
             overflow: TextOverflow.ellipsis,
           ),
-          const SizedBox(height: 2),
-          // Descriptor line - normal
+          // Removed spacing between lines to save space
           AutoSizeText(
             secondaryText!,
             textAlign: TextAlign.left,
@@ -134,13 +127,12 @@ class BillSummaryCard extends StatelessWidget {
       );
     }
 
-    // Single line present (either amount or text).
+    // Single line present
     final single = (hasAmount
         ? secondaryAmount!
         : (hasText ? secondaryText! : ''));
     if (single.isEmpty) return const SizedBox.shrink();
 
-    // Return just the aligned text (outer SizedBox supplies the height)
     return Align(
       alignment: Alignment.centerLeft,
       child: AutoSizeText(
@@ -158,18 +150,20 @@ class BillSummaryCard extends StatelessWidget {
     );
   }
 
+  // --- replace (or update) the build() method portion in your file with this version ---
   @override
   Widget build(BuildContext context) {
-    // previous scale was 0.9 (we reduced by 10% earlier).
-    // Now reduce another 10% from that state → net scale = 0.9 * 0.9 = 0.81
-    const double netScale = 0.9 * 0.9; // 0.81
+    // keep the compact netScale but compute required bottom height from actual fonts
+    const double netScale = 0.85 * 0.85; // 0.7225 - your compact scale
 
     // scaled section heights
     final double topH = topBoxHeight * netScale;
     final double midH = middleBoxHeight * netScale;
-    final double bottomH = bottomBoxHeight * netScale;
 
-    // scale inner padding proportionally
+    // base bottom height scaled
+    final double baseBottomH = bottomBoxHeight * netScale;
+
+    // scale inner padding
     final EdgeInsets scaledInnerPadding = EdgeInsets.fromLTRB(
       innerPadding.left * netScale,
       innerPadding.top * netScale,
@@ -177,8 +171,6 @@ class BillSummaryCard extends StatelessWidget {
       innerPadding.bottom * netScale,
     );
 
-    // Enforce uniform minimum padding on all sides.
-    // Minimum per-side padding = 12.0 (so all sides are same and noticeably padded)
     final double perSidePad = math.max(
       12.0,
       math.max(
@@ -186,29 +178,52 @@ class BillSummaryCard extends StatelessWidget {
         math.max(scaledInnerPadding.right, scaledInnerPadding.bottom),
       ),
     );
-
     final EdgeInsets finalInnerPadding = EdgeInsets.all(perSidePad);
 
-    // compute total height (small safe buffer)
-    final totalHeight =
+    // --- compute minimum required bottom height from actual bottom font sizes ---
+    final bool hasAmount = (secondaryAmount?.trim().isNotEmpty ?? false);
+    final bool hasText = (secondaryText?.trim().isNotEmpty ?? false);
+
+    // conservative line height multiplier
+    const double lineHeightFactor = 1.25;
+
+    double requiredBottomH;
+    if (hasAmount && hasText) {
+      requiredBottomH =
+          (bottomAmountFontSize + bottomTextFontSize) * lineHeightFactor + 2.0;
+    } else if (hasAmount || hasText) {
+      final double used = (hasAmount
+          ? bottomAmountFontSize
+          : bottomTextFontSize);
+      requiredBottomH = used * lineHeightFactor + 2.0;
+    } else {
+      requiredBottomH = 0.0;
+    }
+
+    // final bottom height = max(scaled base, required)
+    double bottomH = math.max(baseBottomH, requiredBottomH);
+
+    // --- SAFETY BUFFER: add a few pixels to avoid tiny fractional overflows ---
+    const double safeBuffer = 3.0;
+    // apply small extra to bottom region so layout won't clip due to sub-pixel rounding
+    bottomH =
+        bottomH + (safeBuffer * 0.4); // add part to bottom area (optional)
+    final double totalHeight =
         topH +
         midH +
         bottomH +
         finalInnerPadding.top +
         finalInnerPadding.bottom +
-        5;
+        safeBuffer;
 
     final textColumn = Expanded(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Top row - title + icon (scaled height)
           SizedBox(
             height: topH,
             child: Align(alignment: Alignment.centerLeft, child: _topRow()),
           ),
-
-          // Middle - primary value (height scaled, font NOT changed)
           SizedBox(
             height: midH,
             child: Align(
@@ -218,7 +233,7 @@ class BillSummaryCard extends StatelessWidget {
                 textAlign: TextAlign.left,
                 style: GoogleFonts.poppins(
                   color: Colors.white,
-                  fontSize: primaryFontSize, // <-- kept the same as requested
+                  fontSize: primaryFontSize,
                   fontWeight: FontWeight.bold,
                 ),
                 maxLines: 1,
@@ -227,8 +242,7 @@ class BillSummaryCard extends StatelessWidget {
               ),
             ),
           ),
-
-          // Bottom - single/two-line (outer height scaled)
+          // bottom — give it flexible room computed above
           SizedBox(
             height: bottomH,
             child: LayoutBuilder(
@@ -249,7 +263,7 @@ class BillSummaryCard extends StatelessWidget {
 
     return Container(
       height: totalHeight,
-      padding: finalInnerPadding, // <-- uniform padding all sides
+      padding: finalInnerPadding,
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
@@ -267,10 +281,7 @@ class BillSummaryCard extends StatelessWidget {
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // single column (icon lives inside topRow)
-          textColumn,
-        ],
+        children: [textColumn],
       ),
     );
   }

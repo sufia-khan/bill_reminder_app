@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:projeckt_k/screens/add_bill_screen.dart';
 import 'package:projeckt_k/services/date_format_service.dart';
 import 'package:projeckt_k/widgets/bill_item_widget.dart';
 import 'package:projeckt_k/services/dialog_service.dart';
+import 'package:projeckt_k/services/subscription_service.dart';
+import 'package:projeckt_k/services/bill_service.dart';
+import 'package:projeckt_k/services/bill_operations_service.dart';
 
 class BillsScreen extends StatefulWidget {
   const BillsScreen({Key? key}) : super(key: key);
@@ -14,10 +18,21 @@ class _BillsScreenState extends State<BillsScreen> {
   List<Map<String, dynamic>> _bills = [];
   bool _isLoading = true;
   String _selectedFilter = 'all';
+  final SubscriptionService _subscriptionService = SubscriptionService();
+  BillOperationsService? _billOperationsService;
 
   @override
   void initState() {
     super.initState();
+    _initializeServices();
+  }
+
+  Future<void> _initializeServices() async {
+    await _subscriptionService.init();
+    final billService = BillService(_bills);
+    setState(() {
+      _billOperationsService = BillOperationsService(billService, context);
+    });
     _loadBills();
   }
 
@@ -26,54 +41,74 @@ class _BillsScreenState extends State<BillsScreen> {
       _isLoading = true;
     });
 
-    // Simulate loading bills
-    await Future.delayed(const Duration(seconds: 1));
-
-    setState(() {
-      _bills = [
-        {
-          'id': '1',
-          'name': 'Electricity Bill',
-          'amount': '120.00',
-          'dueDate': '2024-01-15',
-          'status': 'paid',
-          'category': 'utilities',
-          'frequency': 'monthly',
-          'reminder': '3 days before'
-        },
-        {
-          'id': '2',
-          'name': 'Internet Bill',
-          'amount': '59.99',
-          'dueDate': '2024-01-20',
-          'status': 'upcoming',
-          'category': 'utilities',
-          'frequency': 'monthly',
-          'reminder': '2 days before'
-        },
-        {
-          'id': '3',
-          'name': 'Netflix Subscription',
-          'amount': '15.99',
-          'dueDate': '2024-01-25',
-          'status': 'upcoming',
-          'category': 'entertainment',
-          'frequency': 'monthly',
-          'reminder': '1 day before'
-        },
-        {
-          'id': '4',
-          'name': 'Water Bill',
-          'amount': '45.00',
-          'dueDate': '2024-01-10',
-          'status': 'overdue',
-          'category': 'utilities',
-          'frequency': 'monthly',
-          'reminder': '5 days before'
-        },
-      ];
-      _isLoading = false;
-    });
+    try {
+      final subscriptions = await _subscriptionService.getSubscriptions();
+      setState(() {
+        _bills = subscriptions.map((sub) => {
+          'id': sub['id'] ?? sub['firebaseId'] ?? DateTime.now().millisecondsSinceEpoch.toString(),
+          'name': sub['name'] ?? 'Unknown Bill',
+          'amount': sub['amount']?.toString() ?? '0.00',
+          'dueDate': sub['dueDate'] ?? DateTime.now().toIso8601String(),
+          'status': sub['status'] ?? 'upcoming',
+          'category': sub['category'] ?? 'other',
+          'frequency': sub['frequency'] ?? 'monthly',
+          'reminder': sub['reminder'] ?? 'same day',
+          'index': _bills.length,
+        }).toList();
+        _isLoading = false;
+      });
+    } catch (e) {
+      // Fallback to mock data if Firebase fails
+      setState(() {
+        _bills = [
+          {
+            'id': '1',
+            'name': 'Electricity Bill',
+            'amount': '120.00',
+            'dueDate': '2024-01-15',
+            'status': 'paid',
+            'category': 'utilities',
+            'frequency': 'monthly',
+            'reminder': '3 days before',
+            'index': 0,
+          },
+          {
+            'id': '2',
+            'name': 'Internet Bill',
+            'amount': '59.99',
+            'dueDate': '2024-01-20',
+            'status': 'upcoming',
+            'category': 'utilities',
+            'frequency': 'monthly',
+            'reminder': '2 days before',
+            'index': 1,
+          },
+          {
+            'id': '3',
+            'name': 'Netflix Subscription',
+            'amount': '15.99',
+            'dueDate': '2024-01-25',
+            'status': 'upcoming',
+            'category': 'entertainment',
+            'frequency': 'monthly',
+            'reminder': '1 day before',
+            'index': 2,
+          },
+          {
+            'id': '4',
+            'name': 'Water Bill',
+            'amount': '45.00',
+            'dueDate': '2024-01-10',
+            'status': 'overdue',
+            'category': 'utilities',
+            'frequency': 'monthly',
+            'reminder': '5 days before',
+            'index': 3,
+          },
+        ];
+        _isLoading = false;
+      });
+    }
   }
 
   List<Map<String, dynamic>> get _filteredBills {
@@ -99,6 +134,12 @@ class _BillsScreenState extends State<BillsScreen> {
                 ],
               ),
             ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _showAddBillScreen(),
+        backgroundColor: Colors.blue.shade600,
+        foregroundColor: Colors.white,
+        child: const Icon(Icons.add),
+      ),
     );
   }
 
@@ -132,6 +173,15 @@ class _BillsScreenState extends State<BillsScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showAddBillScreen() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const AddBillScreen(),
       ),
     );
   }
@@ -262,24 +312,84 @@ class _BillsScreenState extends State<BillsScreen> {
   }
 
   void _deleteBill(Map<String, dynamic> bill) {
-    DialogService.showDeleteConfirmDialog(context, bill).then((confirmed) {
+    final billName = bill['name'] ?? 'this bill';
+    final String billId = bill['id'] ?? '';
+
+    if (billId.isEmpty) {
+      DialogService.showErrorSnackBar(context, 'Bill ID is missing');
+      return;
+    }
+
+    DialogService.showDeleteConfirmDialog(context, bill).then((confirmed) async {
       if (confirmed == true) {
+        // Show loading state
         setState(() {
-          _bills.removeWhere((b) => b['id'] == bill['id']);
+          bill['_isDeleting'] = true;
         });
-        DialogService.showSnackBar(context, 'Bill deleted successfully');
+
+        try {
+          // Remove from list first for immediate UI feedback
+          setState(() {
+            _bills.removeWhere((b) => b['id'] == billId);
+          });
+
+          // Delete from Firebase/local storage
+          await _subscriptionService.deleteSubscription(billId);
+
+          DialogService.showSuccessSnackBar(context, '$billName deleted successfully');
+
+        } catch (e) {
+          // Revert on error
+          setState(() {
+            bill['_isDeleting'] = false;
+            _loadBills(); // Reload to restore the bill
+          });
+          DialogService.showErrorSnackBar(context, 'Failed to delete bill. Please try again.');
+        }
       }
     });
   }
 
   void _markAsPaid(Map<String, dynamic> bill) {
     final billName = bill['name'] ?? 'this bill';
-    DialogService.showMarkAsPaidConfirmDialog(context, billName).then((confirmed) {
+    final String billId = bill['id'] ?? '';
+
+    if (billId.isEmpty) {
+      DialogService.showErrorSnackBar(context, 'Bill ID is missing');
+      return;
+    }
+
+    DialogService.showMarkAsPaidConfirmDialog(context, billName).then((confirmed) async {
       if (confirmed == true) {
+        // Show loading state
         setState(() {
-          bill['status'] = 'paid';
+          bill['_isUpdating'] = true;
         });
-        DialogService.showSnackBar(context, 'Bill marked as paid');
+
+        try {
+          // Update locally first for immediate UI feedback
+          setState(() {
+            bill['status'] = 'paid';
+            bill['_isUpdating'] = false;
+          });
+
+          // Update in Firebase/local storage
+          final updatedBill = Map<String, dynamic>.from(bill);
+          updatedBill.remove('_isUpdating');
+          updatedBill['status'] = 'paid';
+
+          await _subscriptionService.updateSubscription(billId, updatedBill);
+
+          DialogService.showSuccessSnackBar(context, '$billName marked as paid!');
+
+        } catch (e) {
+          // Revert on error
+          setState(() {
+            bill['status'] = bill['originalStatus'] ?? 'upcoming';
+            bill['_isUpdating'] = false;
+          });
+          DialogService.showErrorSnackBar(context, 'Failed to mark as paid. Please try again.');
+        }
       }
     });
   }

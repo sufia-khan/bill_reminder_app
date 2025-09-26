@@ -213,9 +213,18 @@ class BillItemWidget extends StatelessWidget {
                   children: [
                     if (!isPaid) ...[
                       OutlinedButton.icon(
-                        onPressed: () => onMarkAsPaid(billIndex),
-                        icon: const Icon(Icons.check, size: 14),
-                        label: const Text('Mark Paid'),
+                        onPressed: bill['_isUpdating'] == true ? null : () => onMarkAsPaid(billIndex),
+                        icon: bill['_isUpdating'] == true
+                            ? SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.green),
+                                ),
+                              )
+                            : const Icon(Icons.check, size: 14),
+                        label: bill['_isUpdating'] == true ? const Text('Updating...') : const Text('Mark Paid'),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: Colors.green,
                           side: const BorderSide(color: Colors.green),
@@ -226,11 +235,22 @@ class BillItemWidget extends StatelessWidget {
                       const SizedBox(width: 8),
                     ],
                     OutlinedButton.icon(
-                      onPressed: () => useHomeScreenEdit
-                          ? onEdit({...bill, 'originalIndex': bill['index'] ?? 0})
-                          : onEdit(bill),
-                      icon: const Icon(Icons.edit, size: 14),
-                      label: const Text('Edit'),
+                      onPressed: bill['_isDeleting'] == true || bill['_isUpdating'] == true
+                          ? null
+                          : () => useHomeScreenEdit
+                              ? onEdit({...bill, 'originalIndex': bill['index'] ?? 0})
+                              : onEdit(bill),
+                      icon: bill['_isDeleting'] == true
+                          ? SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                              ),
+                            )
+                          : const Icon(Icons.edit, size: 14),
+                      label: bill['_isDeleting'] == true ? const Text('Deleting...') : const Text('Edit'),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: Colors.blue,
                         side: const BorderSide(color: Colors.blue),
