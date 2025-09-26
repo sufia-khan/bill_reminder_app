@@ -206,15 +206,37 @@ class SubscriptionService {
       for (final subscription in unsyncedSubscriptions) {
         try {
           final subscriptionToSync = Map<String, dynamic>.from(subscription);
-          subscriptionToSync.remove('localId');
-          subscriptionToSync.remove('source');
-          subscriptionToSync['createdAt'] = FieldValue.serverTimestamp();
-          subscriptionToSync['updatedAt'] = FieldValue.serverTimestamp();
 
-          final docRef = await _subscriptionsCollection.add(subscriptionToSync);
+          // Check if this is a new subscription or an edited one
+          final hasFirebaseId = subscription.containsKey('firebaseId') && subscription['firebaseId'] != null;
 
-          // Mark as synced
-          await _localStorageService?.markAsSynced(subscription['localId'], docRef.id);
+          if (hasFirebaseId) {
+            // This is an edited subscription - update the existing document
+            final firebaseId = subscription['firebaseId'];
+            subscriptionToSync.remove('localId');
+            subscriptionToSync.remove('source');
+            subscriptionToSync.remove('needsSync');
+            subscriptionToSync['updatedAt'] = FieldValue.serverTimestamp();
+
+            await _subscriptionsCollection.doc(firebaseId).update(subscriptionToSync);
+            debugPrint('✅ Updated existing subscription: ${subscription['name']} (ID: $firebaseId)');
+
+            // Mark as synced
+            await _localStorageService?.markAsSynced(subscription['localId'], firebaseId);
+          } else {
+            // This is a new subscription - create a new document
+            subscriptionToSync.remove('localId');
+            subscriptionToSync.remove('source');
+            subscriptionToSync.remove('needsSync');
+            subscriptionToSync['createdAt'] = FieldValue.serverTimestamp();
+            subscriptionToSync['updatedAt'] = FieldValue.serverTimestamp();
+
+            final docRef = await _subscriptionsCollection.add(subscriptionToSync);
+            debugPrint('✅ Created new subscription: ${subscription['name']} (ID: ${docRef.id})');
+
+            // Mark as synced
+            await _localStorageService?.markAsSynced(subscription['localId'], docRef.id);
+          }
 
         } catch (e) {
           debugPrint('Failed to sync subscription ${subscription['name']}: $e');

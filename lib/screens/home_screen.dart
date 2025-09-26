@@ -212,22 +212,56 @@ class HomeScreenState extends State<HomeScreen> {
 
   Future<void> _autoSyncWhenOnline() async {
     try {
+      debugPrint('🔄 Auto-sync triggered!');
       final unsyncedCount = await _subscriptionService.getUnsyncedSubscriptionsCount();
+      debugPrint('🔄 Found $unsyncedCount unsynced items');
 
       if (unsyncedCount > 0) {
-        final success = await _subscriptionService.syncLocalToFirebase();
-
-        if (mounted && success) {
+        // Show syncing indicator
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Auto-synced $unsyncedCount items!'),
-              backgroundColor: Colors.green,
+            const SnackBar(
+              content: Text('Syncing your changes...'),
+              backgroundColor: Colors.blue,
+              duration: Duration(seconds: 2),
             ),
           );
         }
+
+        final success = await _subscriptionService.syncLocalToFirebase();
+
+        if (mounted) {
+          if (success) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('✅ Synced $unsyncedCount items to cloud!'),
+                backgroundColor: Colors.green,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('❌ Some items failed to sync'),
+                backgroundColor: Colors.orange,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+          }
+        }
+      } else {
+        debugPrint('✅ No items to sync');
       }
     } catch (e) {
-      debugPrint('Auto-sync failed: $e');
+      debugPrint('❌ Auto-sync failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Sync failed: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 

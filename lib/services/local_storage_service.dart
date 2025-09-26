@@ -5,6 +5,7 @@ class LocalStorageService {
   static const String _subscriptionsKey = 'subscriptions';
   static const String _lastSyncKey = 'last_sync';
   static const String _userIdKey = 'user_id';
+  static const String _syncStatusKey = 'sync_status';
 
   final SharedPreferences _prefs;
 
@@ -32,6 +33,10 @@ class LocalStorageService {
     final subscriptions = await getSubscriptions();
     final index = subscriptions.indexWhere((sub) => sub['localId'] == localId);
     if (index != -1) {
+      // Mark as needing sync if this is an existing subscription with Firebase ID
+      if (subscriptions[index].containsKey('firebaseId')) {
+        subscription['needsSync'] = true;
+      }
       subscriptions[index] = {...subscriptions[index], ...subscription};
       await _saveSubscriptions(subscriptions);
     }
@@ -58,7 +63,9 @@ class LocalStorageService {
   // Get local subscriptions that need to be synced
   Future<List<Map<String, dynamic>>> getUnsyncedSubscriptions() async {
     final subscriptions = await getSubscriptions();
-    return subscriptions.where((sub) => !sub.containsKey('firebaseId')).toList();
+    return subscriptions.where((sub) =>
+      !sub.containsKey('firebaseId') || sub['needsSync'] == true
+    ).toList();
   }
 
   // Mark subscription as synced
@@ -67,6 +74,7 @@ class LocalStorageService {
     final index = subscriptions.indexWhere((sub) => sub['localId'] == localId);
     if (index != -1) {
       subscriptions[index]['firebaseId'] = firebaseId;
+      subscriptions[index]['needsSync'] = false; // Clear sync flag
       await _saveSubscriptions(subscriptions);
     }
   }
