@@ -45,7 +45,7 @@ class HomeScreenState extends State<HomeScreen> {
 
   // Loading states
   bool _isAddingBill = false;
-  bool _isMarkingPaid = false;
+  String? _markingPaidBillId;
 
   @override
   void initState() {
@@ -435,108 +435,72 @@ class HomeScreenState extends State<HomeScreen> {
 
   Future<void> _markBillAsPaid(int index) async {
     if (index < 0 || index >= _bills.length) return;
-    if (_isMarkingPaid) return;
+
+    final bill = _bills[index];
+    final billId = _getBillId(bill);
+
+    if (_markingPaidBillId == billId) return;
 
     setState(() {
-      _isMarkingPaid = true;
+      _markingPaidBillId = billId;
     });
 
     try {
       final bill = _bills[index];
       final billName = bill['name']?.toString() ?? 'Bill';
+      final now = DateTime.now();
 
-      // MOBILE DEBUG: Print detailed bill information
-      debugPrint('📱 MOBILE DEBUG: Attempting to mark bill as paid');
-      debugPrint('📱 Bill name: $billName');
-      debugPrint('📱 Bill ID: ${bill['id']}');
-      debugPrint('📱 Local ID: ${bill['localId']}');
-      debugPrint('📱 Firebase ID: ${bill['firebaseId']}');
-      debugPrint('📱 Current status: ${bill['status']}');
-
-      // CRITICAL: Save to local storage FIRST to ensure persistence
-      final localId = bill['localId'] ?? bill['id'];
-      if (localId != null) {
-        try {
-          final updatedBill = Map<String, dynamic>.from(bill);
-          updatedBill['status'] = 'paid';
-          updatedBill['paidDate'] = DateTime.now().toIso8601String();
-          updatedBill['lastModified'] = DateTime.now().toIso8601String();
-
-          await _subscriptionService.localStorageService?.updateSubscription(
-            localId,
-            updatedBill,
-          );
-          debugPrint(
-            '✅ Saved paid status to local storage for $billName (Local ID: $localId)',
-          );
-        } catch (storageError) {
-          debugPrint('❌ Failed to save to local storage: $storageError');
-          throw Exception('Failed to save bill locally: $storageError');
-        }
-      }
-
-      // MOBILE DEBUG: Check connectivity status
-      debugPrint('📱 MOBILE DEBUG: Checking connectivity...');
-      final online = await _subscriptionService.isOnline();
-      debugPrint('📱 MOBILE DEBUG: Online status: $online');
-
-      // THEN try to sync with Firebase
-      if (online) {
-        try {
-          final firebaseId = bill['firebaseId'];
-          debugPrint('📱 MOBILE DEBUG: Firebase ID found: $firebaseId');
-
-          if (firebaseId != null) {
-            final updatedBill = Map<String, dynamic>.from(bill);
-            updatedBill['status'] = 'paid';
-            updatedBill['paidDate'] = DateTime.now().toIso8601String();
-            updatedBill['lastModified'] = DateTime.now().toIso8601String();
-
-            debugPrint('📱 MOBILE DEBUG: Attempting Firebase update...');
-            await _subscriptionService.updateSubscription(
-              firebaseId,
-              updatedBill,
-            );
-            debugPrint('✅ Synced paid status to Firebase for $billName');
-          } else {
-            debugPrint(
-              '⚠️ No Firebase ID found for $billName - paid status saved locally only',
-            );
-          }
-        } catch (firebaseError) {
-          debugPrint(
-            '⚠️ Firebase sync failed for $billName: $firebaseError - paid status saved locally',
-          );
-        }
-      } else {
-        debugPrint('📵 Offline - paid status saved locally for $billName');
-      }
-
-      // Update UI immediately AFTER saving to local storage
-      final updatedBill = Map<String, dynamic>.from(_bills[index]);
+      // Update UI immediately for faster feedback
+      final updatedBill = Map<String, dynamic>.from(bill);
       updatedBill['status'] = 'paid';
-      updatedBill['paidDate'] = DateTime.now().toIso8601String();
+      updatedBill['paidDate'] = now.toIso8601String();
+      updatedBill['lastModified'] = now.toIso8601String();
 
       if (mounted) {
         setState(() {
           _bills[index] = updatedBill;
         });
-        debugPrint('✅ UI updated for $billName');
       }
 
-      // Show success message
+      // Save to local storage in parallel
+      final localId = bill['localId'] ?? bill['id'];
+      if (localId != null) {
+        _subscriptionService.localStorageService?.updateSubscription(
+          localId,
+          updatedBill,
+        ).then((_) {
+          debugPrint('✅ Saved paid status to local storage for $billName');
+        }).catchError((storageError) {
+          debugPrint('❌ Failed to save to local storage: $storageError');
+        });
+      }
+
+      // Check connectivity and sync with Firebase if online
+      _subscriptionService.isOnline().then((online) {
+        if (online && bill['firebaseId'] != null) {
+          _subscriptionService.updateSubscription(
+            bill['firebaseId'],
+            updatedBill,
+          ).then((_) {
+            debugPrint('✅ Synced paid status to Firebase for $billName');
+          }).catchError((firebaseError) {
+            debugPrint('⚠️ Firebase sync failed for $billName: $firebaseError');
+          });
+        }
+      });
+
+      // Show success message immediately
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '$billName marked as paid successfully! ${online ? '(Synced to cloud)' : '(Saved locally)'}',
+            '$billName marked as paid successfully!',
           ),
           backgroundColor: Colors.green,
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          duration: const Duration(seconds: 2),
         ),
       );
-
-      debugPrint('🎉 $billName successfully marked as paid');
     } catch (e) {
       debugPrint('❌ Critical error marking bill as paid: $e');
 
@@ -566,6 +530,12 @@ class HomeScreenState extends State<HomeScreen> {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
       );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _markingPaidBillId = null;
+        });
+      }
     }
   }
 
@@ -707,11 +677,8 @@ class HomeScreenState extends State<HomeScreen> {
         }
       }
     } finally {
-      if (mounted) {
-        setState(() {
-          _isMarkingPaid = false;
-        });
-      }
+      // Note: This is for the _updateBill method, not _markBillAsPaid
+      // We don't need to reset _markingPaidBillId here as it's for editing, not marking as paid
     }
   }
 
@@ -805,6 +772,11 @@ class HomeScreenState extends State<HomeScreen> {
       debugPrint('Error parsing due date: $e');
       return null;
     }
+  }
+
+  // Helper method to get bill ID consistently
+  String? _getBillId(Map<String, dynamic> bill) {
+    return bill['id']?.toString() ?? bill['localId']?.toString() ?? bill['firebaseId']?.toString();
   }
 
   // Helper method to calculate reminder date based on reminder preference
@@ -1119,7 +1091,7 @@ class HomeScreenState extends State<HomeScreen> {
                       ),
 
                       const SizedBox(height: 20),
-                      Row(
+                     Row(
                         children: [
                           Expanded(
                             child: BillSummaryCard(
@@ -1148,16 +1120,13 @@ class HomeScreenState extends State<HomeScreen> {
                                   : "less than last month",
                               topBoxHeight: sharedTop,
                               middleBoxHeight: sharedMiddle,
-                              bottomBoxHeight:
-                                  sharedBottom, // same fixed height
-                              bottomAmountFontSize: 13,
+                              bottomBoxHeight: sharedBottom,
+                              // keep This Month bottom sizes as before
+                              bottomAmountFontSize: 14,
                               bottomTextFontSize: 13,
-                              minBottomFontSize: 11,
                             ),
                           ),
                           const SizedBox(width: 10),
-
-                          // compute once at build time (place this above the Row that builds the cards)
                           Expanded(
                             child: BillSummaryCard(
                               title: "Next 7 Days",
@@ -1178,17 +1147,19 @@ class HomeScreenState extends State<HomeScreen> {
                               ],
                               primaryValue:
                                   "\$${_getUpcoming7DaysTotal().toStringAsFixed(2)}",
+
+                              // increase the bottom (count) size here:
                               secondaryText:
-                                  "${_getUpcoming7DaysCount()} ${_getUpcoming7DaysCount() == 1 ? 'bill' : 'bills'}",
+                                  "${_getUpcoming7DaysCount()} bills",
                               topBoxHeight: sharedTop,
                               middleBoxHeight: sharedMiddle,
                               bottomBoxHeight: sharedBottom,
-
-                              // ✅ fixes the extra empty padding below the text
-                              bottomAmountFontSize: 20,
-                              bottomTextFontSize: 20,
-                              minBottomFontSize: 18,
-                              bottomHeightBoost: 0,
+                              // larger bottom fonts for emphasis
+                              bottomAmountFontSize:
+                                  20, // if you show an amount here, it'll be bigger
+                              bottomTextFontSize:
+                                  22, // <-- increased size for the "X bills" text
+                              minBottomFontSize: 12,
                             ),
                           ),
                         ],
@@ -1667,6 +1638,7 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildBillCard(Map<String, dynamic> bill, int index) {
+    // Cache frequently accessed values for better performance
     final dueDate = _parseDueDate(bill);
     final now = DateTime.now();
     final isOverdue =
@@ -1675,6 +1647,8 @@ class HomeScreenState extends State<HomeScreen> {
     final category = bill['category'] != null
         ? Category.findById(bill['category'].toString())
         : null;
+    final billId = _getBillId(bill);
+    final isMarkingThisBillPaid = _markingPaidBillId == billId;
 
     // Determine status color and text
     Color statusColor;
@@ -1829,7 +1803,7 @@ class HomeScreenState extends State<HomeScreen> {
                       if (!isPaid)
                         TextButton.icon(
                           onPressed: () async {
-                            if (_isMarkingPaid) return;
+                            if (isMarkingThisBillPaid) return;
 
                             bool? confirm = await _showMarkAsPaidConfirmDialog(
                               context,
@@ -1839,7 +1813,7 @@ class HomeScreenState extends State<HomeScreen> {
                               await _markBillAsPaid(index);
                             }
                           },
-                          icon: _isMarkingPaid
+                          icon: isMarkingThisBillPaid
                               ? SizedBox(
                                   width: 12,
                                   height: 12,
@@ -1851,7 +1825,7 @@ class HomeScreenState extends State<HomeScreen> {
                                   ),
                                 )
                               : const Icon(Icons.check, size: 16),
-                          label: _isMarkingPaid
+                          label: isMarkingThisBillPaid
                               ? const SizedBox(
                                   width: 12,
                                   height: 12,
