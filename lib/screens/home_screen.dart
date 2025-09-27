@@ -50,6 +50,10 @@ class HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    // Start with loading state
+    setState(() {
+      _isLoading = true;
+    });
     _initializeApp();
   }
 
@@ -57,7 +61,7 @@ class HomeScreenState extends State<HomeScreen> {
     debugPrint('🚀 Initializing app...');
     await _initServices();
     await _checkConnectivity();
-    await _loadSubscriptions();
+    await _loadFromLocalStorageOnly(); // Load from local storage only
     _setupConnectivityListener();
     _startPeriodicUpdates();
     debugPrint('✅ App initialization completed');
@@ -131,7 +135,76 @@ class HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  void _checkForOverdueBills() {
+  // Initialize status for a single bill (upcoming, overdue, paid)
+  void _initializeSingleBillStatus(Map<String, dynamic> bill) {
+    try {
+      final dueDate = _parseDueDate(bill);
+      final now = DateTime.now();
+
+      if (bill['status'] == 'paid') {
+        // Keep paid status
+        bill['status'] = 'paid';
+      } else if (dueDate != null && dueDate.isBefore(now)) {
+        // Mark as overdue if due date has passed
+        bill['status'] = 'overdue';
+      } else if (dueDate != null && dueDate.isAfter(now)) {
+        // Mark as upcoming if due date is in the future
+        bill['status'] = 'upcoming';
+      } else {
+        // No due date or due date is today, mark as upcoming by default
+        bill['status'] = 'upcoming';
+      }
+    } catch (e) {
+      debugPrint('Error initializing single bill status: $e');
+      // Default to upcoming if there's an error
+      bill['status'] = 'upcoming';
+    }
+  }
+
+  // Initialize status for all bills (upcoming, overdue, paid)
+  void _initializeBillStatuses() {
+    bool needsUpdate = false;
+    final now = DateTime.now();
+
+    for (var bill in _bills) {
+      try {
+        final dueDate = _parseDueDate(bill);
+        String newStatus = bill['status'] ?? '';
+
+        if (bill['status'] == 'paid') {
+          // Keep paid status
+          newStatus = 'paid';
+        } else if (dueDate != null && dueDate.isBefore(now)) {
+          // Mark as overdue if due date has passed
+          newStatus = 'overdue';
+        } else if (dueDate != null && dueDate.isAfter(now)) {
+          // Mark as upcoming if due date is in the future
+          newStatus = 'upcoming';
+        } else if (dueDate == null) {
+          // No due date, mark as upcoming by default
+          newStatus = 'upcoming';
+        }
+
+        if (bill['status'] != newStatus) {
+          bill['status'] = newStatus;
+          needsUpdate = true;
+        }
+      } catch (e) {
+        debugPrint('Error initializing bill status: $e');
+        // Default to upcoming if there's an error
+        if (bill['status'] != 'paid') {
+          bill['status'] = 'upcoming';
+          needsUpdate = true;
+        }
+      }
+    }
+
+    if (needsUpdate && mounted) {
+      setState(() {});
+    }
+  }
+
+  void _checkForOverdueBills() async {
     bool needsUpdate = false;
     final now = DateTime.now();
     final notificationService = NotificationService();
@@ -146,6 +219,34 @@ class HomeScreenState extends State<HomeScreen> {
           // Mark bill as overdue
           bill['status'] = 'overdue';
           needsUpdate = true;
+
+          // Save the updated status to local storage
+          final localId = bill['localId'] ?? bill['id'];
+          if (localId != null) {
+            await _subscriptionService.localStorageService?.updateSubscription(
+              localId,
+              bill,
+            );
+            debugPrint(
+              '✅ Saved overdue status to local storage for: ${bill['name']}',
+            );
+          }
+
+          // Try to sync with Firebase if online
+          final online = await _subscriptionService.isOnline();
+          if (online) {
+            final firebaseId = bill['firebaseId'];
+            if (firebaseId != null) {
+              try {
+                await _subscriptionService.updateSubscription(firebaseId, bill);
+                debugPrint(
+                  '✅ Synced overdue status to Firebase for: ${bill['name']}',
+                );
+              } catch (e) {
+                debugPrint('⚠️ Failed to sync overdue status to Firebase: $e');
+              }
+            }
+          }
 
           // Send immediate overdue notification
           _sendOverdueBillNotification(bill, notificationService);
@@ -498,18 +599,30 @@ class HomeScreenState extends State<HomeScreen> {
         });
       }
 
-      // Save to local storage
+      // Save to local storage with status
       if (originalBill['localId'] != null) {
+        final billToSave = Map<String, dynamic>.from(_bills[index]);
+        // Ensure status is properly set before saving
+        if (billToSave['status'] == null ||
+            billToSave['status'].toString().isEmpty) {
+          _initializeSingleBillStatus(billToSave);
+        }
         await _subscriptionService.localStorageService?.updateSubscription(
           originalBill['localId'],
-          _bills[index],
+          billToSave,
         );
       } else {
         // Create new local ID if needed
         _bills[index]['localId'] = DateTime.now().millisecondsSinceEpoch
             .toString();
+        final billToSave = Map<String, dynamic>.from(_bills[index]);
+        // Ensure status is properly set before saving
+        if (billToSave['status'] == null ||
+            billToSave['status'].toString().isEmpty) {
+          _initializeSingleBillStatus(billToSave);
+        }
         await _subscriptionService.localStorageService?.saveSubscription(
-          _bills[index],
+          billToSave,
         );
       }
 
@@ -520,8 +633,14 @@ class HomeScreenState extends State<HomeScreen> {
       await _checkConnectivity();
 
       if (_isOnline && billId != null) {
-        // Update in Firebase
-        await _subscriptionService.updateSubscription(billId, updatedBill);
+        // Update in Firebase with proper status
+        final firebaseBill = Map<String, dynamic>.from(updatedBill);
+        // Ensure status is properly set before saving to Firebase
+        if (firebaseBill['status'] == null ||
+            firebaseBill['status'].toString().isEmpty) {
+          _initializeSingleBillStatus(firebaseBill);
+        }
+        await _subscriptionService.updateSubscription(billId, firebaseBill);
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -829,6 +948,11 @@ class HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     // shared heights you used earlier
+    final int upcomingCount = _getUpcoming7DaysCount();
+    final String upcomingText = upcomingCount == 1
+        ? '1 bill'
+        : '$upcomingCount bills';
+
     const double sharedTop = 36;
     const double sharedMiddle = 72;
     const double sharedBottom = 45;
@@ -1032,6 +1156,8 @@ class HomeScreenState extends State<HomeScreen> {
                             ),
                           ),
                           const SizedBox(width: 10),
+
+                          // compute once at build time (place this above the Row that builds the cards)
                           Expanded(
                             child: BillSummaryCard(
                               title: "Next 7 Days",
@@ -1053,14 +1179,16 @@ class HomeScreenState extends State<HomeScreen> {
                               primaryValue:
                                   "\$${_getUpcoming7DaysTotal().toStringAsFixed(2)}",
                               secondaryText:
-                                  "${_getUpcoming7DaysCount()} bills",
+                                  "${_getUpcoming7DaysCount()} ${_getUpcoming7DaysCount() == 1 ? 'bill' : 'bills'}",
                               topBoxHeight: sharedTop,
                               middleBoxHeight: sharedMiddle,
-                              bottomBoxHeight:
-                                  sharedBottom, // same fixed height
-                              bottomTextFontSize:
-                                  15, // only slightly larger than 13
-                              minBottomFontSize: 11,
+                              bottomBoxHeight: sharedBottom,
+
+                              // ✅ fixes the extra empty padding below the text
+                              bottomAmountFontSize: 20,
+                              bottomTextFontSize: 20,
+                              minBottomFontSize: 18,
+                              bottomHeightBoost: 0,
                             ),
                           ),
                         ],
@@ -1076,80 +1204,71 @@ class HomeScreenState extends State<HomeScreen> {
               child: SafeArea(
                 top: false,
                 minimum: const EdgeInsets.all(6),
-                child: RefreshIndicator(
-                  onRefresh: () async {}, // Disabled refresh functionality
-                  color: Colors.white,
-                  backgroundColor: Colors.transparent,
-                  displacement: 40,
-                  strokeWidth: 3,
-                  child: ListView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.only(top: 6),
-                    children: [
-                      // Category Tabs Section
-                      const SizedBox(height: 10),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Categories',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black87,
-                              ),
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.only(top: 6),
+                  children: [
+                    // Category Tabs Section
+                    const SizedBox(height: 10),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Categories',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black87,
                             ),
-                            const SizedBox(height: 10),
-                            Container(
-                              height: 60,
-                              child: RawScrollbar(
-                                thumbColor: HSLColor.fromAHSL(
-                                  1.0,
-                                  236,
-                                  0.89,
-                                  0.75,
-                                ).toColor(),
-                                radius: const Radius.circular(20),
-                                thickness: 4,
-                                thumbVisibility: true,
+                          ),
+                          const SizedBox(height: 10),
+                          Container(
+                            height: 60,
+                            child: RawScrollbar(
+                              thumbColor: HSLColor.fromAHSL(
+                                1.0,
+                                236,
+                                0.89,
+                                0.75,
+                              ).toColor(),
+                              radius: const Radius.circular(20),
+                              thickness: 4,
+                              thumbVisibility: true,
+                              controller: _categoryScrollController,
+                              child: SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
                                 controller: _categoryScrollController,
-                                child: SingleChildScrollView(
-                                  scrollDirection: Axis.horizontal,
-                                  controller: _categoryScrollController,
-                                  child: Row(
-                                    children: _buildCategoryTabsList(),
-                                  ),
-                                ),
+                                child: Row(children: _buildCategoryTabsList()),
                               ),
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 24),
+                    ),
+                    const SizedBox(height: 24),
 
-                      // Status Tabs Bar
-                      Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 16),
-                        decoration: BoxDecoration(
-                          color: Colors.grey[100],
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Row(children: _buildStatusTabsList()),
+                    // Status Tabs Bar
+                    Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[100],
+                        borderRadius: BorderRadius.circular(16),
                       ),
+                      child: Row(children: _buildStatusTabsList()),
+                    ),
 
-                      const SizedBox(height: 16),
+                    const SizedBox(height: 16),
 
-                      // Filtered Bills Content
-                      Container(
-                        constraints: BoxConstraints(
-                          minHeight: MediaQuery.of(context).size.height * 0.4,
-                        ),
-                        child: _buildFilteredBillsContent(),
+                    // Filtered Bills Content
+                    Container(
+                      constraints: BoxConstraints(
+                        minHeight: MediaQuery.of(context).size.height * 0.4,
                       ),
-                    ],
-                  ),
+                      child: _buildFilteredBillsContent(),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -1324,6 +1443,53 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildFilteredBillsContent() {
+    // Show loading indicator while data is loading
+    if (_isLoading) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
+            ),
+            SizedBox(height: 16),
+            Text(
+              'Loading your bills...',
+              style: TextStyle(fontSize: 16, color: Colors.grey),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Show error message if there's an error
+    if (_hasError) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.error_outline, color: Colors.red, size: 48),
+            SizedBox(height: 16),
+            Text(
+              'Failed to load bills',
+              style: TextStyle(fontSize: 16, color: Colors.grey),
+            ),
+            SizedBox(height: 8),
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _hasError = false;
+                  _isLoading = true;
+                });
+                _loadFromLocalStorageOnly();
+              },
+              child: Text('Retry'),
+            ),
+          ],
+        ),
+      );
+    }
+
     // Filter bills based on selected status and category
     List<Map<String, dynamic>> filteredBills = [];
 
@@ -3466,6 +3632,9 @@ class HomeScreenState extends State<HomeScreen> {
     await _checkConnectivity();
     debugPrint('Adding subscription. Network status: $_isOnline');
 
+    // Ensure status is properly set before saving
+    _initializeSingleBillStatus(subscription);
+
     if (_isOnline) {
       try {
         // Try to add to Firebase first
@@ -3474,6 +3643,7 @@ class HomeScreenState extends State<HomeScreen> {
         // If successful, refresh from local to ensure consistency
         if (mounted) {
           await _refreshBillsForCategory(); // Refresh from local storage
+          _initializeBillStatuses(); // Initialize all bill statuses
           _checkForOverdueBills(); // Immediate check for overdue status
 
           // Show success message
@@ -3531,6 +3701,7 @@ class HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         setState(() {
           _bills.add(subscription);
+          _initializeBillStatuses(); // Initialize all bill statuses
           _checkForOverdueBills(); // Immediate check for overdue status
         });
         ScaffoldMessenger.of(context).showSnackBar(
@@ -3582,24 +3753,54 @@ class HomeScreenState extends State<HomeScreen> {
         debugPrint(
           '🔄 Refreshed bills for category: ${_bills.length} bills loaded',
         );
+
+        // Initialize bill statuses after refresh
+        _initializeBillStatuses();
       }
     } catch (e) {
       debugPrint('⚠️ Failed to refresh bills for category: $e');
     }
   }
 
+  // Load ONLY from local storage - fast and minimal Firebase usage
+  Future<void> _loadFromLocalStorageOnly() async {
+    if (!mounted) return;
+
+    debugPrint('📱 Loading from local storage only...');
+
+    try {
+      final localSubscriptions = await _subscriptionService
+          .getLocalSubscriptions();
+
+      if (mounted) {
+        setState(() {
+          _bills = localSubscriptions;
+          _isLoading = false; // Turn off loading indicator
+        });
+        debugPrint('✅ Loaded ${_bills.length} bills from local storage');
+
+        // Initialize bill statuses
+        _initializeBillStatuses();
+      }
+    } catch (e) {
+      debugPrint('❌ Local storage load failed: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _hasError = true;
+        });
+      }
+    }
+  }
+
+  // Load subscriptions with Firebase sync (only called when needed)
   Future<void> _loadSubscriptions() async {
     if (!mounted) return;
 
-    debugPrint('📱 Loading subscriptions (SMART LOCAL-FIRST)...');
-    setState(() {
-      _isLoading = true;
-      _hasError = false;
-    });
+    debugPrint('📱 Loading subscriptions with Firebase sync...');
 
     try {
-      // ALWAYS load from local first (fast, no Firebase needed)
-      debugPrint('🗂️ Loading from local storage...');
+      // Load from local storage first
       final localSubscriptions = await _subscriptionService
           .getLocalSubscriptions();
 
@@ -3608,102 +3809,19 @@ class HomeScreenState extends State<HomeScreen> {
           _bills = localSubscriptions;
           _isLoading = false;
         });
-        debugPrint(
-          '✅ UI updated with ${_bills.length} bills from local storage',
-        );
+        debugPrint('✅ Loaded ${_bills.length} bills from local storage');
+
+        // Initialize bill statuses
+        _initializeBillStatuses();
       }
 
-      // THEN check if we should sync with Firebase (smart sync)
-      final shouldSync = await _subscriptionService.shouldSyncWithFirebase();
-      if (shouldSync) {
-        debugPrint('🌐 Smart sync triggered, attempting background sync...');
-        try {
-          final syncedSubscriptions = await _subscriptionService
-              .getSubscriptions();
-
-          // Smart merge: preserve local paid status changes while syncing other data
-          if (mounted) {
-            bool needsUpdate = false;
-            final List<Map<String, dynamic>> mergedBills = [];
-
-            for (var syncedBill in syncedSubscriptions) {
-              final localBill = _bills.firstWhere(
-                (b) =>
-                    b['id'] == syncedBill['id'] ||
-                    b['firebaseId'] == syncedBill['firebaseId'] ||
-                    b['localId'] == syncedBill['localId'],
-                orElse: () => syncedBill,
-              );
-
-              // Check if local bill has important changes to preserve
-              bool localHasPaidStatus = localBill['status'] == 'paid';
-              bool syncedHasPaidStatus = syncedBill['status'] == 'paid';
-
-              // Create merged bill
-              Map<String, dynamic> mergedBill = Map.from(syncedBill);
-
-              if (localHasPaidStatus) {
-                // Always preserve local paid status and paid date
-                mergedBill['status'] = 'paid';
-                mergedBill['paidDate'] = localBill['paidDate'];
-                needsUpdate = true;
-                debugPrint(
-                  '🔄 Preserving paid status for: ${syncedBill['name']}',
-                );
-              }
-
-              // Check for other local changes that should be preserved
-              // (like recent edits that haven't synced yet)
-              if (localBill.containsKey('lastModified') &&
-                  syncedBill.containsKey('lastModified')) {
-                final localModified = DateTime.tryParse(
-                  localBill['lastModified'].toString(),
-                );
-                final syncedModified = DateTime.tryParse(
-                  syncedBill['lastModified'].toString(),
-                );
-
-                if (localModified != null &&
-                    syncedModified != null &&
-                    localModified.isAfter(syncedModified)) {
-                  // Local version is newer, preserve more fields
-                  for (var key in localBill.keys) {
-                    if (!['id', 'firebaseId', 'localId'].contains(key)) {
-                      mergedBill[key] = localBill[key];
-                    }
-                  }
-                  needsUpdate = true;
-                  debugPrint(
-                    '🔄 Preserving newer local version for: ${syncedBill['name']}',
-                  );
-                }
-              }
-
-              mergedBills.add(mergedBill);
-            }
-
-            // Only update if there are actual changes
-            if (needsUpdate || mergedBills.length != _bills.length) {
-              setState(() {
-                _bills = mergedBills;
-              });
-              debugPrint(
-                '🔄 UI updated with merged data: ${_bills.length} bills (preserved local paid status)',
-              );
-            } else {
-              debugPrint('✅ No changes needed from sync');
-            }
-          }
-        } catch (e) {
-          debugPrint(
-            '⚠️ Background sync failed, but local data is available: $e',
-          );
-        }
-      } else {
-        debugPrint('⏭️ Skipping sync - not needed or offline');
+      // Only sync with Firebase if online and needed
+      final isOnline = await _subscriptionService.isOnline();
+      if (isOnline) {
+        _startFirebaseSync();
       }
     } catch (e) {
-      debugPrint('❌ Failed to load from local storage: $e');
+      debugPrint('❌ Load failed: $e');
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -3711,6 +3829,52 @@ class HomeScreenState extends State<HomeScreen> {
         });
       }
     }
+  }
+
+  // Minimal Firebase sync - only when absolutely necessary
+  void _startFirebaseSync() {
+    Future.microtask(() async {
+      debugPrint('🌐 Starting minimal Firebase sync...');
+
+      try {
+        final isOnline = await _subscriptionService.isOnline();
+        if (!isOnline) {
+          debugPrint('⏭️ Offline - skipping Firebase sync');
+          return;
+        }
+
+        // Only sync if we haven't synced recently or if there are unsynced changes
+        final shouldSync = await _subscriptionService.shouldSyncWithFirebase();
+        if (!shouldSync) {
+          debugPrint('⏭️ No sync needed - using local data');
+          return;
+        }
+
+        // Get fresh data from Firebase (minimal usage)
+        final firebaseSubscriptions = await _subscriptionService
+            .getSubscriptions();
+
+        if (mounted) {
+          setState(() {
+            _bills = firebaseSubscriptions;
+          });
+          debugPrint('🔄 UI updated with ${_bills.length} bills from Firebase');
+
+          // Re-initialize bill statuses
+          _initializeBillStatuses();
+
+          // Update local storage (only when Firebase data changes)
+          for (var subscription in firebaseSubscriptions) {
+            await _subscriptionService.localStorageService?.saveSubscription(
+              subscription,
+            );
+          }
+          debugPrint('💾 Local storage synced with Firebase');
+        }
+      } catch (e) {
+        debugPrint('❌ Firebase sync failed, keeping local data: $e');
+      }
+    });
   }
 
   Future<void> addSubscription(Map<dynamic, dynamic> subscription) async {
@@ -3774,8 +3938,12 @@ class HomeScreenState extends State<HomeScreen> {
       final localId = subscription['localId'] ?? subscription['id'];
       if (localId != null) {
         try {
-          await _subscriptionService.localStorageService?.deleteSubscription(localId);
-          debugPrint('✅ Deleted from local storage for $subscriptionName (ID: $localId)');
+          await _subscriptionService.localStorageService?.deleteSubscription(
+            localId,
+          );
+          debugPrint(
+            '✅ Deleted from local storage for $subscriptionName (ID: $localId)',
+          );
         } catch (storageError) {
           debugPrint('❌ Failed to delete from local storage: $storageError');
           throw Exception('Failed to delete bill locally: $storageError');
@@ -3789,8 +3957,11 @@ class HomeScreenState extends State<HomeScreen> {
         try {
           // Try to delete from Firebase
           final firebaseId = subscription['firebaseId'] ?? subscription['id'];
-          if (firebaseId != null && (firebaseId.startsWith('sub_') || firebaseId.length > 20)) {
-            debugPrint('🌐 Online, deleting from Firebase: $subscriptionName (ID: $firebaseId)');
+          if (firebaseId != null &&
+              (firebaseId.startsWith('sub_') || firebaseId.length > 20)) {
+            debugPrint(
+              '🌐 Online, deleting from Firebase: $subscriptionName (ID: $firebaseId)',
+            );
             await _subscriptionService.deleteSubscription(firebaseId);
             debugPrint('✅ Deleted from Firebase for $subscriptionName');
           }
@@ -3809,13 +3980,17 @@ class HomeScreenState extends State<HomeScreen> {
             );
           }
         } catch (firebaseError) {
-          debugPrint('⚠️ Firebase delete failed for $subscriptionName: $firebaseError');
+          debugPrint(
+            '⚠️ Firebase delete failed for $subscriptionName: $firebaseError',
+          );
 
           // Still show success since local deletion worked
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('$subscriptionName deleted locally. Will sync when online.'),
+                content: Text(
+                  '$subscriptionName deleted locally. Will sync when online.',
+                ),
                 backgroundColor: Colors.orange,
                 behavior: SnackBarBehavior.floating,
                 shape: RoundedRectangleBorder(
@@ -3832,7 +4007,9 @@ class HomeScreenState extends State<HomeScreen> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('$subscriptionName deleted locally. Will sync when online.'),
+              content: Text(
+                '$subscriptionName deleted locally. Will sync when online.',
+              ),
               backgroundColor: Colors.orange,
               behavior: SnackBarBehavior.floating,
               shape: RoundedRectangleBorder(
@@ -3861,14 +4038,15 @@ class HomeScreenState extends State<HomeScreen> {
       } catch (e) {
         debugPrint('Error canceling notification: $e');
       }
-
     } catch (e) {
       debugPrint('❌ Error deleting bill $subscriptionName: $e');
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to delete $subscriptionName: ${e.toString()}'),
+            content: Text(
+              'Failed to delete $subscriptionName: ${e.toString()}',
+            ),
             backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(

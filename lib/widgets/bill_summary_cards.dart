@@ -7,36 +7,35 @@ import 'package:google_fonts/google_fonts.dart';
 class BillSummaryCard extends StatelessWidget {
   const BillSummaryCard({
     Key? key,
-    required this.title,
+  required this.title,
     required this.icon,
     required this.gradientColors,
     required this.primaryValue,
     this.secondaryAmount,
     this.secondaryText,
-
     // Box section heights
     this.topBoxHeight = 2,
     this.middleBoxHeight = 17,
     this.bottomBoxHeight = 9,
-
     // Font sizes
     this.primaryFontSize = 24,
     this.minPrimaryFontSize = 10,
     this.bottomAmountFontSize = 7,
     this.bottomTextFontSize = 7,
     this.minBottomFontSize = 6,
-
     this.innerPadding = const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-
     // Icon configs
     this.iconSize = 18,
     this.iconOnRight = false,
     this.textIconGap = 6,
-
     // NEW → extra boost for bottom box only
     this.bottomHeightBoost = 6,
+    // NEW → force single-line bottom text to be bold
+    this.forceBottomBold = false,
   }) : assert(gradientColors.length >= 2),
        super(key: key);
+  final double bottomHeightBoost; // new field
+  final bool forceBottomBold;     // <--- NEW
 
   final String title;
   final IconData icon;
@@ -60,7 +59,6 @@ class BillSummaryCard extends StatelessWidget {
   final bool iconOnRight;
   final double textIconGap;
 
-  final double bottomHeightBoost; // new field
 
   // ----------------------
   Widget _topRow() {
@@ -137,14 +135,17 @@ class BillSummaryCard extends StatelessWidget {
         : (hasText ? secondaryText! : ''));
     if (single.isEmpty) return const SizedBox.shrink();
 
-    return Align(
+       return Align(
       alignment: Alignment.centerLeft,
       child: AutoSizeText(
         single,
         textAlign: TextAlign.left,
         style: GoogleFonts.poppins(
           fontSize: bottomAmountFontSize,
-          fontWeight: hasAmount ? FontWeight.bold : FontWeight.w600,
+          // make bold if there's an amount OR if forceBottomBold is true
+          fontWeight: hasAmount
+              ? FontWeight.bold
+              : (forceBottomBold ? FontWeight.bold : FontWeight.w600),
           color: hasAmount ? Colors.white : Colors.white70,
         ),
         maxLines: 1,
@@ -152,6 +153,7 @@ class BillSummaryCard extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
       ),
     );
+
   }
 
   @override

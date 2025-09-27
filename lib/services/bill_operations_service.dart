@@ -18,7 +18,7 @@ class BillOperationsService {
           DialogService.showSuccessSnackBar(context, '$billName marked as paid!');
         }
       });
-    }
+    } 
   }
 
   void deleteBill(int billIndex) {
