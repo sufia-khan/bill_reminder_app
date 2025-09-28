@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:projeckt_k/services/notification_service.dart';
 import 'package:projeckt_k/services/local_storage_service.dart';
+import 'package:projeckt_k/services/subscription_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({Key? key}) : super(key: key);
@@ -154,6 +155,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
               Icons.download,
               Colors.teal,
               () => _exportData(),
+            ),
+            _buildListTile(
+              'Clean Up Duplicates',
+              'Remove duplicate bills from cloud storage',
+              Icons.cleaning_services,
+              Colors.orange,
+              () => _cleanupDuplicates(),
             ),
             _buildListTile(
               'Clear Data',
@@ -623,5 +631,74 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _cleanupDuplicates() async {
+    // Check internet connection
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      _showSettingFeedback('You must be logged in to clean up duplicates', backgroundColor: Colors.red);
+      return;
+    }
+
+    // Show confirmation dialog
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Clean Up Duplicates?'),
+        content: const Text('This will scan your cloud storage and remove duplicate bills. This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.orange),
+            child: const Text('Clean Up'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    // Show loading indicator
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const AlertDialog(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Scanning for duplicates...'),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      final subscriptionService = SubscriptionService();
+      final result = await subscriptionService.cleanupDuplicateSubscriptions();
+
+      // Hide loading indicator
+      Navigator.pop(context);
+
+      // Show result
+      _showSettingFeedback(
+        result['message'],
+        backgroundColor: result['success'] ? Colors.green : Colors.orange,
+      );
+    } catch (e) {
+      // Hide loading indicator
+      Navigator.pop(context);
+
+      _showSettingFeedback(
+        'Failed to clean up duplicates: ${e.toString()}',
+        backgroundColor: Colors.red,
+      );
+    }
   }
 }

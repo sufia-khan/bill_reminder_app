@@ -9,6 +9,10 @@ class SubscriptionService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   LocalStorageService? _localStorageService;
 
+  // Sync state management to prevent duplicates
+  bool _isSyncing = false;
+  DateTime? _lastSyncTime;
+
   // Initialize local storage
   Future<void> init() async {
     _localStorageService = await LocalStorageService.init();
@@ -122,6 +126,21 @@ class SubscriptionService {
   // Batch sync local subscriptions to Firebase (optimized for reduced usage)
   Future<bool> syncLocalToFirebase() async {
     try {
+      // Prevent multiple syncs running simultaneously
+      if (_isSyncing) {
+        debugPrint('🔄 Sync already in progress, skipping...');
+        return false;
+      }
+
+      // Prevent rapid successive syncs (minimum 30 seconds between syncs)
+      if (_lastSyncTime != null) {
+        final timeSinceLastSync = DateTime.now().difference(_lastSyncTime!);
+        if (timeSinceLastSync.inSeconds < 30) {
+          debugPrint('🔄 Sync cooldown active (${timeSinceLastSync.inSeconds}s ago), skipping...');
+          return true; // Return true because this isn't an error
+        }
+      }
+
       // Check if online first
       if (!await isOnline()) {
         debugPrint('📵 Offline - skipping sync');
@@ -136,7 +155,9 @@ class SubscriptionService {
         return true;
       }
 
-      debugPrint('🔄 Syncing ${unsyncedSubscriptions.length} updates and ${deletedSubscriptions.length} deletions');
+      // Mark sync as started
+      _isSyncing = true;
+      debugPrint('🔄 Starting sync: ${unsyncedSubscriptions.length} updates, ${deletedSubscriptions.length} deletions');
 
       bool hasErrors = false;
       final List<Map<String, dynamic>> successfullySynced = [];
@@ -169,18 +190,32 @@ class SubscriptionService {
 
             debugPrint('📝 Queued update: ${subscription['name']}');
           } else {
-            // Create new document
-            subscriptionToSync['createdAt'] = FieldValue.serverTimestamp();
-            subscriptionToSync['updatedAt'] = FieldValue.serverTimestamp();
-            final docRef = _subscriptionsCollection.doc();
-            batch.set(docRef, subscriptionToSync);
+            // DEDUPLICATION CHECK: Look for existing subscription by name and amount
+            final existingSubscription = await _findExistingSubscription(subscription);
+            if (existingSubscription != null) {
+              // Found existing subscription, update it instead of creating duplicate
+              debugPrint('🔄 Found existing subscription, updating: ${subscription['name']}');
+              subscriptionToSync['updatedAt'] = FieldValue.serverTimestamp();
+              batch.update(_subscriptionsCollection.doc(existingSubscription.id), subscriptionToSync);
 
-            successfullySynced.add({
-              'localId': subscription['localId'],
-              'firebaseId': docRef.id,
-            });
+              successfullySynced.add({
+                'localId': subscription['localId'],
+                'firebaseId': existingSubscription.id,
+              });
+            } else {
+              // Create new document (no duplicate found)
+              subscriptionToSync['createdAt'] = FieldValue.serverTimestamp();
+              subscriptionToSync['updatedAt'] = FieldValue.serverTimestamp();
+              final docRef = _subscriptionsCollection.doc();
+              batch.set(docRef, subscriptionToSync);
 
-            debugPrint('📝 Queued creation: ${subscription['name']}');
+              successfullySynced.add({
+                'localId': subscription['localId'],
+                'firebaseId': docRef.id,
+              });
+
+              debugPrint('📝 Queued creation: ${subscription['name']}');
+            }
           }
         } catch (e) {
           debugPrint('❌ Failed to prepare subscription ${subscription['name']}: $e');
@@ -229,6 +264,45 @@ class SubscriptionService {
     } catch (e) {
       debugPrint('❌ Sync failed: $e');
       return false;
+    } finally {
+      // Always reset sync state
+      _isSyncing = false;
+      _lastSyncTime = DateTime.now();
+      debugPrint('✅ Sync completed, state reset');
+    }
+  }
+
+  // Find existing subscription to prevent duplicates
+  Future<DocumentSnapshot?> _findExistingSubscription(Map<String, dynamic> subscription) async {
+    try {
+      final name = subscription['name']?.toString().toLowerCase().trim();
+      final amount = subscription['amount']?.toString();
+      final userId = _auth.currentUser?.uid;
+
+      if (name == null || name.isEmpty || amount == null || userId == null) {
+        return null;
+      }
+
+      // Look for subscription with same name and amount for this user
+      final querySnapshot = await _firestore
+          .collection('users')
+          .doc(userId)
+          .collection('subscriptions')
+          .where('name', isEqualTo: subscription['name'])
+          .where('amount', isEqualTo: amount)
+          .limit(1)
+          .get();
+
+      if (querySnapshot.docs.isNotEmpty) {
+        final existingDoc = querySnapshot.docs.first;
+        debugPrint('🔍 Found existing subscription: ${existingDoc.id} - ${existingDoc['name']}');
+        return existingDoc;
+      }
+
+      return null;
+    } catch (e) {
+      debugPrint('❌ Error checking for existing subscription: $e');
+      return null;
     }
   }
 
@@ -438,6 +512,83 @@ class SubscriptionService {
       }
     } catch (e) {
       debugPrint('❌ Periodic sync failed: $e');
+    }
+  }
+
+  // Clean up duplicate subscriptions in Firestore
+  Future<int> cleanupDuplicateSubscriptions() async {
+    try {
+      if (!await isOnline()) {
+        debugPrint('📵 Offline - cannot cleanup duplicates');
+        return 0;
+      }
+
+      final userId = _auth.currentUser?.uid;
+      if (userId == null) {
+        debugPrint('❌ No user logged in');
+        return 0;
+      }
+
+      debugPrint('🧹 Starting duplicate cleanup...');
+
+      // Get all subscriptions from Firestore
+      final querySnapshot = await _subscriptionsCollection.get();
+      final allSubscriptions = querySnapshot.docs;
+
+      // Group subscriptions by name and amount to find duplicates
+      final Map<String, List<DocumentSnapshot>> groupedSubscriptions = {};
+
+      for (final doc in allSubscriptions) {
+        final data = doc.data() as Map<String, dynamic>;
+        final name = data['name']?.toString().toLowerCase().trim() ?? '';
+        final amount = data['amount']?.toString() ?? '';
+        final key = '$name|$amount';
+
+        if (key.isNotEmpty && key != '|') {
+          if (!groupedSubscriptions.containsKey(key)) {
+            groupedSubscriptions[key] = [];
+          }
+          groupedSubscriptions[key]!.add(doc);
+        }
+      }
+
+      // Find and remove duplicates (keep the oldest one)
+      int duplicatesRemoved = 0;
+      final batch = _firestore.batch();
+
+      for (final entry in groupedSubscriptions.entries) {
+        if (entry.value.length > 1) {
+          // Sort by creation time (oldest first)
+          entry.value.sort((a, b) {
+            final aTime = a['createdAt'] as Timestamp?;
+            final bTime = b['createdAt'] as Timestamp?;
+            if (aTime == null && bTime == null) return 0;
+            if (aTime == null) return 1;
+            if (bTime == null) return -1;
+            return aTime.compareTo(bTime);
+          });
+
+          // Keep the oldest, delete the rest
+          for (int i = 1; i < entry.value.length; i++) {
+            final duplicateDoc = entry.value[i];
+            batch.delete(duplicateDoc.reference);
+            duplicatesRemoved++;
+            debugPrint('🗑️ Marked duplicate for deletion: ${duplicateDoc['name']} (ID: ${duplicateDoc.id})');
+          }
+        }
+      }
+
+      if (duplicatesRemoved > 0) {
+        await batch.commit();
+        debugPrint('✅ Cleaned up $duplicatesRemoved duplicate subscriptions');
+      } else {
+        debugPrint('✅ No duplicates found');
+      }
+
+      return duplicatesRemoved;
+    } catch (e) {
+      debugPrint('❌ Failed to cleanup duplicates: $e');
+      return 0;
     }
   }
 

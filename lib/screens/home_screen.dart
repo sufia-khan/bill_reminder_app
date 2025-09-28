@@ -1548,23 +1548,23 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
                   padding: const EdgeInsets.only(top: 6),
                   children: [
                     // Category Tabs Section
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 6),
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const Text(
                             'Categories',
                             style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
                               color: Colors.black87,
                             ),
                           ),
-                          const SizedBox(height: 10),
+                          const SizedBox(height: 6),
                           Container(
-                            height: 60,
+                            height: 40,
                             child: RawScrollbar(
                               thumbColor: HSLColor.fromAHSL(
                                 1.0,
@@ -1586,19 +1586,19 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
                         ],
                       ),
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 12),
 
                     // Status Tabs Bar
                     Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 16),
+                      margin: const EdgeInsets.symmetric(horizontal: 12),
                       decoration: BoxDecoration(
                         color: Colors.grey[100],
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(12),
                       ),
                       child: Row(children: _buildStatusTabsList()),
                     ),
 
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 8),
 
                     // Filtered Bills Content
                     Container(
@@ -1637,12 +1637,20 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
               });
             },
             child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 12),
+              padding: const EdgeInsets.symmetric(vertical: 8),
               decoration: BoxDecoration(
-                color: selectedStatus == status['id']
-                    ? HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor()
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(12),
+                gradient: selectedStatus == status['id']
+                    ? LinearGradient(
+                        colors: [
+                          HSLColor.fromAHSL(1.0, 250, 0.84, 0.60).toColor(),
+                          HSLColor.fromAHSL(1.0, 280, 0.75, 0.65).toColor(),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      )
+                    : null,
+                color: selectedStatus == status['id'] ? null : Colors.transparent,
+                borderRadius: BorderRadius.circular(8),
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -1652,9 +1660,9 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
                     color: selectedStatus == status['id']
                         ? Colors.white
                         : Colors.grey[600],
-                    size: 20,
+                    size: 16,
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 1),
                   Text(
                     status['title'] as String,
                     style: TextStyle(
@@ -1664,7 +1672,8 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
                       fontWeight: selectedStatus == status['id']
                           ? FontWeight.w600
                           : FontWeight.w500,
-                      fontSize: 12,
+                      fontSize: 11,
+                      fontFamily: GoogleFonts.poppins().fontFamily,
                     ),
                   ),
                 ],
@@ -1727,21 +1736,29 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: isSelected
-              ? HSLColor.fromAHSL(1.0, 236, 0.89, 0.75)
-                    .toColor() // 🔹 same as bottom nav
-              : Colors.white,
-          borderRadius: BorderRadius.circular(20),
+          gradient: isSelected
+              ? LinearGradient(
+                  colors: [
+                    HSLColor.fromAHSL(1.0, 250, 0.84, 0.60).toColor(),
+                    HSLColor.fromAHSL(1.0, 280, 0.75, 0.65).toColor(),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                )
+              : null,
+          color: isSelected ? null : Colors.white,
+          borderRadius: BorderRadius.circular(12),
           border: isSelected
               ? null
               : Border.all(color: Colors.grey[300]!, width: 1),
           boxShadow: isSelected
               ? [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.2),
-                    blurRadius: 4,
+                    color: HSLColor.fromAHSL(1.0, 250, 0.84, 0.60).toColor().withValues(alpha: 0.25),
+                    blurRadius: 8,
+                    spreadRadius: 1,
                     offset: const Offset(0, 2),
                   ),
                 ]
@@ -1752,7 +1769,8 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
           style: TextStyle(
             color: isSelected ? Colors.white : Colors.black87,
             fontWeight: FontWeight.w600,
-            fontSize: 14,
+            fontSize: 12,
+            fontFamily: GoogleFonts.poppins().fontFamily,
           ),
         ),
       ),
@@ -4774,5 +4792,54 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
       // Fallback to 9:00 AM if there's an error
       return const TimeOfDay(hour: 9, minute: 0);
     }
+  }
+
+  /// Clean up duplicate subscriptions in Firestore
+  Future<void> _cleanupDuplicates() async {
+    if (!_isOnline) {
+      _showErrorSnackBar('Cleanup requires internet connection');
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _hasError = false;
+    });
+
+    try {
+      final result = await _subscriptionService.cleanupDuplicateSubscriptions();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result['message']),
+            backgroundColor: result['success'] ? Colors.green : Colors.orange,
+          ),
+        );
+
+        // Reload data to show cleaned-up results
+        await _loadDataWithSyncPriority();
+      }
+    } catch (e) {
+      if (mounted) {
+        _showErrorSnackBar('Failed to cleanup duplicates: ${e.toString()}');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  /// Show error snack bar
+  void _showErrorSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+      ),
+    );
   }
 }
