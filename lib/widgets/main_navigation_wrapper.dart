@@ -37,7 +37,7 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
   late final List<Widget> _screens = [
     HomeScreen(key: _homeScreenKey),
     AnalyticsScreen(),
-    HomeScreen(), // Placeholder for index 2 (Add Bill - uses bottom sheet)
+    Container(), // Placeholder for index 2 (Add Bill - uses bottom sheet)
     AllBillsScreen(),
     SettingsScreen(),
   ];
@@ -50,7 +50,10 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: _screens[_currentIndex],
+      body: IndexedStack(
+        index: _currentIndex,
+        children: _screens,
+      ),
       extendBody: true,
       bottomNavigationBar: Container(
         padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),

@@ -26,13 +26,25 @@ class HomeScreen extends StatefulWidget {
   HomeScreenState createState() => HomeScreenState();
 }
 
-class HomeScreenState extends State<HomeScreen> {
+class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
   // --- state fields (must be inside the State class) ---
   List<Map<String, dynamic>> _bills = [];
   final SubscriptionService _subscriptionService = SubscriptionService();
   bool _isLoading = false;
   bool _hasError = false;
   bool _isOnline = false;
+  bool _isInitialized = false; // Track if initialization is complete
+  DateTime? _lastDataLoadTime; // Track when data was last loaded
+  bool _isBackgroundRefresh = false; // Track if we're doing background refresh
+  bool _isFirstBuild = true; // Track if this is the first build
+
+  // Cached calculations for performance
+  int? _cachedUpcoming7DaysCount;
+  double? _cachedUpcoming7DaysTotal;
+  double? _cachedThisMonthTotal;
+  DateTime? _lastCalculationTime;
   StreamSubscription<bool>? _connectivitySubscription;
   final ValueNotifier<bool> _connectivityNotifier = ValueNotifier<bool>(false);
   Timer? _updateTimer;
@@ -50,20 +62,38 @@ class HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    // Start with loading state
-    setState(() {
-      _isLoading = true;
-    });
-    _initializeApp();
+
+    // If we have data, never show loading or reinitialize
+    if (_bills.isNotEmpty && _isInitialized) {
+      _isLoading = false;
+      return;
+    }
+
+    // Only initialize on first run
+    if (!_isInitialized) {
+      _isLoading = _bills.isEmpty; // Only show loading if no data
+      _initializeApp();
+    }
   }
 
   Future<void> _initializeApp() async {
+    if (_isInitialized) {
+      debugPrint('🔄 App already initialized, skipping...');
+      return;
+    }
+
     debugPrint('🚀 Initializing app...');
     await _initServices();
     await _checkConnectivity();
     await _loadDataWithSyncPriority(); // Load with Firebase priority for cross-device sync
     _setupConnectivityListener();
     _startPeriodicUpdates();
+
+    if (mounted) {
+      setState(() {
+        _isInitialized = true;
+      });
+    }
     debugPrint('✅ App initialization completed');
   }
 
@@ -90,6 +120,98 @@ class HomeScreenState extends State<HomeScreen> {
     _connectivityNotifier.dispose();
     _updateTimer?.cancel();
     super.dispose();
+  }
+
+  @override
+  void activate() {
+    // Called when the widget becomes active again (e.g., when navigating back)
+    debugPrint('🔄 Home screen activated');
+
+    // Always ensure loading is false when activating and we have data
+    if (_bills.isNotEmpty && mounted) {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+
+    // NEVER trigger any loading when activating - just silent background sync if needed
+    if (_isInitialized && _bills.isNotEmpty) {
+      // Only do silent background sync, never show any loading
+      _isBackgroundRefresh = true;
+      _silentBackgroundSync();
+      // Reset flag after a short delay
+      Future.delayed(const Duration(seconds: 1), () {
+        if (mounted) {
+          _isBackgroundRefresh = false;
+        }
+      });
+    }
+
+    super.activate();
+  }
+
+  // Update cached calculations for better performance
+  void _updateCachedCalculations() {
+    if (_bills.isEmpty) {
+      _cachedUpcoming7DaysCount = 0;
+      _cachedUpcoming7DaysTotal = 0.0;
+      _cachedThisMonthTotal = 0.0;
+      _lastCalculationTime = DateTime.now();
+      return;
+    }
+
+    _cachedUpcoming7DaysCount = _calculateUpcoming7DaysCount();
+    _cachedUpcoming7DaysTotal = _calculateUpcoming7DaysTotal();
+    _cachedThisMonthTotal = _calculateThisMonthTotal();
+    _lastCalculationTime = DateTime.now();
+  }
+
+  // Silent background sync - never shows loading, never affects UI
+  Future<void> _silentBackgroundSync() async {
+    if (!mounted) return;
+
+    try {
+      debugPrint('🔄 Silent background sync started...');
+
+      // Only sync if we have a network connection
+      final isOnline = await _subscriptionService.isOnline();
+      if (!isOnline) {
+        debugPrint('🔄 Offline, skipping background sync');
+        return;
+      }
+
+      // Perform periodic sync in background
+      await _subscriptionService.performPeriodicSync();
+
+      // If new data was synced, update our bills list silently
+      final freshData = await _subscriptionService.getSubscriptions();
+      if (freshData.length != _bills.length) {
+        debugPrint('🔄 Background sync found ${freshData.length} bills (was ${_bills.length})');
+        if (mounted) {
+          setState(() {
+            _bills = freshData;
+            _updateCachedCalculations();
+          });
+        }
+      }
+
+      debugPrint('✅ Silent background sync completed');
+    } catch (e) {
+      debugPrint('⚠️ Background sync failed: $e');
+      // Silent failures are okay - don't affect user experience
+    }
+  }
+
+  // Public method to force refresh data (can be called from parent widget)
+  void forceRefresh({bool showLoading = true}) {
+    debugPrint('🔄 Force refreshing home screen data');
+    if (showLoading && mounted) {
+      setState(() {
+        _isLoading = true;
+      });
+    }
+    _lastDataLoadTime = null; // Reset the timestamp to force refresh
+    _refreshDataFromFirebase();
   }
 
   Future<void> _checkConnectivity() async {
@@ -399,8 +521,12 @@ class HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         setState(() {
           _bills = freshData;
+          _lastDataLoadTime = DateTime.now(); // Update load time
         });
         debugPrint('✅ UI updated with ${_bills.length} bills');
+
+        // Update cached calculations for instant display
+        _updateCachedCalculations();
       }
 
       // Trigger sync in background if needed
@@ -674,6 +800,7 @@ class HomeScreenState extends State<HomeScreen> {
         setState(() {
           _bills[index] = Map.from(originalBill)..addAll(updatedBill);
           _checkForOverdueBills(); // Immediate check for overdue status
+          _updateCachedCalculations(); // Update cached calculations
         });
 
         // Update reminders locally
@@ -987,8 +1114,8 @@ class HomeScreenState extends State<HomeScreen> {
     return thisMonthTotal - lastMonthTotal;
   }
 
-  // Helper method for upcoming bills count (next 7 days)
-  int _getUpcoming7DaysCount() {
+  // Calculate upcoming bills count (next 7 days) - raw calculation
+  int _calculateUpcoming7DaysCount() {
     int count = 0;
     final now = DateTime.now();
     final sevenDaysFromNow = now.add(const Duration(days: 7));
@@ -1012,8 +1139,8 @@ class HomeScreenState extends State<HomeScreen> {
     return count;
   }
 
-  // Helper method to get total amount for upcoming bills (next 7 days)
-  double _getUpcoming7DaysTotal() {
+  // Calculate total amount for upcoming bills (next 7 days) - raw calculation
+  double _calculateUpcoming7DaysTotal() {
     double total = 0.0;
     final now = DateTime.now();
     final sevenDaysFromNow = now.add(const Duration(days: 7));
@@ -1039,8 +1166,75 @@ class HomeScreenState extends State<HomeScreen> {
     return total;
   }
 
+  // Calculate this month total - raw calculation
+  double _calculateThisMonthTotal() {
+    double total = 0.0;
+    final now = DateTime.now();
+    final currentMonth = now.month;
+    final currentYear = now.year;
+
+    for (var bill in _bills) {
+      try {
+        final dueDate = _parseDueDate(bill);
+        if (dueDate != null &&
+            dueDate.month == currentMonth &&
+            dueDate.year == currentYear &&
+            bill['status'] != 'paid') {
+          final amount = double.tryParse(bill['amount']?.toString() ?? '0') ?? 0.0;
+          total += amount;
+        }
+      } catch (e) {
+        debugPrint('Error calculating this month total: $e');
+      }
+    }
+    return total;
+  }
+
+  // Cached getter methods for instant access
+  int _getUpcoming7DaysCount() {
+    if (_cachedUpcoming7DaysCount == null || _shouldRecalculate()) {
+      _updateCachedCalculations();
+    }
+    return _cachedUpcoming7DaysCount ?? 0;
+  }
+
+  double _getUpcoming7DaysTotal() {
+    if (_cachedUpcoming7DaysTotal == null || _shouldRecalculate()) {
+      _updateCachedCalculations();
+    }
+    return _cachedUpcoming7DaysTotal ?? 0.0;
+  }
+
+  double _getThisMonthTotal() {
+    if (_cachedThisMonthTotal == null || _shouldRecalculate()) {
+      _updateCachedCalculations();
+    }
+    return _cachedThisMonthTotal ?? 0.0;
+  }
+
+  bool _shouldRecalculate() {
+    if (_lastCalculationTime == null) return true;
+
+    // Only recalculate if bills have changed or it's been more than 1 minute
+    final now = DateTime.now();
+    return now.difference(_lastCalculationTime!) > const Duration(minutes: 1);
+  }
+
   @override
   Widget build(BuildContext context) {
+    super.build(context);
+
+    // Reset first build flag after first build
+    if (_isFirstBuild) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          setState(() {
+            _isFirstBuild = false;
+          });
+        }
+      });
+    }
+
     // shared heights you used earlier
     final int upcomingCount = _getUpcoming7DaysCount();
     final String upcomingText = upcomingCount == 1
@@ -1460,7 +1654,7 @@ class HomeScreenState extends State<HomeScreen> {
                         : Colors.grey[600],
                     size: 20,
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
                   Text(
                     status['title'] as String,
                     style: TextStyle(
@@ -1588,8 +1782,8 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildFilteredBillsContent() {
-    // Show loading indicator while data is loading
-    if (_isLoading) {
+    // Show loading indicator ONLY on first app start with no data, NEVER when navigating back
+    if (_isLoading && !_isBackgroundRefresh && _bills.isEmpty && !_isInitialized) {
       return const Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -1824,10 +2018,10 @@ class HomeScreenState extends State<HomeScreen> {
     final billId = _getBillId(bill);
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 8),
       child: Card(
-        elevation: 3,
-        shadowColor: Colors.black.withValues(alpha: 0.1),
+        elevation: 6,
+        shadowColor: Colors.black.withValues(alpha: 0.15),
         color: Colors.white,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
@@ -1842,28 +2036,28 @@ class HomeScreenState extends State<HomeScreen> {
           borderRadius: BorderRadius.circular(16),
           onTap: () => _showBillManagementBottomSheet(context, bill, index),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // Main content row
                 Row(
                   children: [
-                    // Large category icon
+                    // Category icon
                     Container(
-                      width: 56,
-                      height: 56,
+                      width: 40,
+                      height: 40,
                       decoration: BoxDecoration(
                         color: _getCategoryColor(category?.id),
-                        borderRadius: BorderRadius.circular(14),
+                        borderRadius: BorderRadius.circular(10),
                       ),
                       child: Icon(
                         category?.icon ?? Icons.receipt,
                         color: Colors.white,
-                        size: 28,
+                        size: 20,
                       ),
                     ),
-                    const SizedBox(width: 16),
+                    const SizedBox(width: 12),
 
                     // Bill details
                     Expanded(
@@ -1873,15 +2067,16 @@ class HomeScreenState extends State<HomeScreen> {
                           // Bill name
                           Text(
                             bill['name']?.toString() ?? 'Unnamed Bill',
-                            style: const TextStyle(
-                              fontSize: 20,
+                            style: TextStyle(
+                              fontSize: 18,
                               fontWeight: FontWeight.w700,
                               color: Colors.black87,
+                              fontFamily: GoogleFonts.poppins().fontFamily,
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 2),
 
                           // Category name
                           Text(
@@ -1890,6 +2085,7 @@ class HomeScreenState extends State<HomeScreen> {
                               fontSize: 13,
                               fontWeight: FontWeight.w500,
                               color: Colors.grey[600],
+                              fontFamily: GoogleFonts.poppins().fontFamily,
                             ),
                           ),
                           const SizedBox(height: 2),
@@ -1901,6 +2097,7 @@ class HomeScreenState extends State<HomeScreen> {
                               fontSize: 11,
                               fontWeight: FontWeight.w400,
                               color: Colors.grey[500],
+                              fontFamily: GoogleFonts.poppins().fontFamily,
                             ),
                           ),
                         ],
@@ -1914,12 +2111,13 @@ class HomeScreenState extends State<HomeScreen> {
                         Text(
                           '\$${bill['amount']?.toString() ?? '0.00'}',
                           style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
                             color: isOverdue ? Colors.red : Colors.black87,
+                            fontFamily: GoogleFonts.poppins().fontFamily,
                           ),
                         ),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 4),
                         // Status text below amount
                         Text(
                           isPaid ? 'Paid' :
@@ -1931,9 +2129,10 @@ class HomeScreenState extends State<HomeScreen> {
                             color: isPaid ? Colors.green :
                                    isOverdue ? Colors.red :
                                    Colors.blue[700],
+                            fontFamily: GoogleFonts.poppins().fontFamily,
                           ),
                         ),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 4),
                         // Manage text button
                         GestureDetector(
                           onTap: () => _showBillManagementBottomSheet(context, bill, index),
@@ -1949,6 +2148,7 @@ class HomeScreenState extends State<HomeScreen> {
                                 fontSize: 12,
                                 fontWeight: FontWeight.w600,
                                 color: Colors.blue[700],
+                                fontFamily: GoogleFonts.poppins().fontFamily,
                               ),
                             ),
                           ),
@@ -2357,6 +2557,7 @@ class HomeScreenState extends State<HomeScreen> {
 
                   setState(() {
                     _bills.removeAt(billIndex);
+                    _updateCachedCalculations(); // Update cached calculations
                   });
                   Navigator.pop(context);
 
@@ -2370,6 +2571,7 @@ class HomeScreenState extends State<HomeScreen> {
                 } catch (e) {
                   setState(() {
                     _bills.removeAt(billIndex);
+                    _updateCachedCalculations(); // Update cached calculations
                   });
                   Navigator.pop(context);
 
@@ -3972,6 +4174,7 @@ class HomeScreenState extends State<HomeScreen> {
         if (mounted) {
           setState(() {
             _bills.add(subscription);
+            _updateCachedCalculations(); // Update cached calculations
           });
         }
 
@@ -4141,6 +4344,28 @@ class HomeScreenState extends State<HomeScreen> {
   Future<void> _loadDataWithSyncPriority() async {
     if (!mounted) return;
 
+    // NEVER reload if we already have data and are initialized
+    if (_isInitialized && _bills.isNotEmpty) {
+      debugPrint('🔄 Skipping data load - already have ${_bills.length} bills loaded');
+      return;
+    }
+
+    // Check if we should skip data loading (e.g., when navigating back)
+    final now = DateTime.now();
+    if (_lastDataLoadTime != null &&
+        now.difference(_lastDataLoadTime!) < const Duration(seconds: 30)) {
+      debugPrint('🔄 Skipping data load - last load was ${now.difference(_lastDataLoadTime!).inSeconds} seconds ago');
+      return;
+    }
+
+    // Only show loading indicator if we have no data at all
+    final shouldShowLoading = _bills.isEmpty && !_isBackgroundRefresh;
+    if (shouldShowLoading && mounted) {
+      setState(() {
+        _isLoading = true;
+      });
+    }
+
     debugPrint(
       '🔄 Loading data with local-first approach...',
     );
@@ -4179,10 +4404,14 @@ class HomeScreenState extends State<HomeScreen> {
         setState(() {
           _bills = filteredSubscriptions;
           _isLoading = false;
+          _lastDataLoadTime = DateTime.now(); // Update last load time
         });
         debugPrint(
           '✅ Final loaded ${_bills.length} valid bills (filtered from ${subscriptions.length} total)',
         );
+
+        // Update cached calculations for instant display
+        _updateCachedCalculations();
 
         // Initialize bill statuses
         _initializeBillStatuses();
@@ -4501,6 +4730,7 @@ class HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         setState(() {
           _bills.removeAt(index);
+          _updateCachedCalculations(); // Update cached calculations
         });
       }
 
