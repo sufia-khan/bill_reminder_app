@@ -53,6 +53,7 @@ class MyApp extends StatelessWidget {
         ),
         cardTheme: CardThemeData(
           elevation: 8,
+          color: Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
@@ -65,7 +66,7 @@ class MyApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      themeMode: ThemeMode.system,
+      themeMode: ThemeMode.light,
       initialRoute: '/',
       routes: {
         '/': (context) => AuthWrapper(syncService: syncService),

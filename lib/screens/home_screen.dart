@@ -61,7 +61,7 @@ class HomeScreenState extends State<HomeScreen> {
     debugPrint('🚀 Initializing app...');
     await _initServices();
     await _checkConnectivity();
-    await _loadFromLocalStorageOnly(); // Load from local storage only
+    await _loadDataWithSyncPriority(); // Load with Firebase priority for cross-device sync
     _setupConnectivityListener();
     _startPeriodicUpdates();
     debugPrint('✅ App initialization completed');
@@ -69,6 +69,9 @@ class HomeScreenState extends State<HomeScreen> {
 
   Future<void> _initServices() async {
     await _subscriptionService.init();
+
+    // Clean up any mixed user data from old storage system
+    await _subscriptionService.localStorageService?.cleanupMixedUserData();
 
     // Set up notification callback for mark as paid action
     final notificationService = NotificationService();
@@ -131,6 +134,11 @@ class HomeScreenState extends State<HomeScreen> {
     _updateTimer = Timer.periodic(const Duration(minutes: 1), (timer) {
       if (mounted) {
         _checkForOverdueBills();
+
+        // Every 5 minutes, also refresh data from Firebase for cross-device sync
+        if (timer.tick % 5 == 0) {
+          _refreshDataFromFirebase();
+        }
       }
     });
   }
@@ -360,6 +368,12 @@ class HomeScreenState extends State<HomeScreen> {
       } else {
         debugPrint('✅ No items to sync');
       }
+
+      // After syncing, refresh data from Firebase to get changes from other devices
+      debugPrint(
+        '🔄 Refreshing data from Firebase to get changes from other devices...',
+      );
+      await _refreshDataFromFirebase();
     } catch (e) {
       debugPrint('❌ Auto-sync failed: $e');
       if (mounted) {
@@ -370,6 +384,30 @@ class HomeScreenState extends State<HomeScreen> {
           ),
         );
       }
+    }
+  }
+
+  // Refresh data from local storage (local-first approach)
+  Future<void> _refreshDataFromFirebase() async {
+    try {
+      debugPrint('🔄 Refreshing data from local storage...');
+
+      // Get data from local storage only
+      final freshData = await _subscriptionService.getSubscriptions();
+      debugPrint('✅ Refreshed ${freshData.length} bills from local storage');
+
+      if (mounted) {
+        setState(() {
+          _bills = freshData;
+        });
+        debugPrint('✅ UI updated with ${_bills.length} bills');
+      }
+
+      // Trigger sync in background if needed
+      unawaited(_subscriptionService.performPeriodicSync());
+
+    } catch (e) {
+      debugPrint('❌ Failed to refresh data: $e');
     }
   }
 
@@ -465,36 +503,36 @@ class HomeScreenState extends State<HomeScreen> {
       // Save to local storage in parallel
       final localId = bill['localId'] ?? bill['id'];
       if (localId != null) {
-        _subscriptionService.localStorageService?.updateSubscription(
-          localId,
-          updatedBill,
-        ).then((_) {
-          debugPrint('✅ Saved paid status to local storage for $billName');
-        }).catchError((storageError) {
-          debugPrint('❌ Failed to save to local storage: $storageError');
-        });
+        _subscriptionService.localStorageService
+            ?.updateSubscription(localId, updatedBill)
+            .then((_) {
+              debugPrint('✅ Saved paid status to local storage for $billName');
+            })
+            .catchError((storageError) {
+              debugPrint('❌ Failed to save to local storage: $storageError');
+            });
       }
 
       // Check connectivity and sync with Firebase if online
       _subscriptionService.isOnline().then((online) {
         if (online && bill['firebaseId'] != null) {
-          _subscriptionService.updateSubscription(
-            bill['firebaseId'],
-            updatedBill,
-          ).then((_) {
-            debugPrint('✅ Synced paid status to Firebase for $billName');
-          }).catchError((firebaseError) {
-            debugPrint('⚠️ Firebase sync failed for $billName: $firebaseError');
-          });
+          _subscriptionService
+              .updateSubscription(bill['firebaseId'], updatedBill)
+              .then((_) {
+                debugPrint('✅ Synced paid status to Firebase for $billName');
+              })
+              .catchError((firebaseError) {
+                debugPrint(
+                  '⚠️ Firebase sync failed for $billName: $firebaseError',
+                );
+              });
         }
       });
 
       // Show success message immediately
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            '$billName marked as paid successfully!',
-          ),
+          content: Text('$billName marked as paid successfully!'),
           backgroundColor: Colors.green,
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -561,46 +599,38 @@ class HomeScreenState extends State<HomeScreen> {
     }
 
     try {
-      // Update UI immediately
-      if (mounted) {
-        setState(() {
-          _bills[index] = Map.from(originalBill)..addAll(updatedBill);
-          _checkForOverdueBills();
-        });
-      }
+      // Note: UI is already updated by the calling method for immediate feedback
 
-      // Save to local storage with status
-      if (originalBill['localId'] != null) {
+      // Save to local storage in parallel (optimized like paid functionality)
+      final localId = originalBill['localId'] ?? originalBill['id'];
+      if (localId != null) {
         final billToSave = Map<String, dynamic>.from(_bills[index]);
         // Ensure status is properly set before saving
         if (billToSave['status'] == null ||
             billToSave['status'].toString().isEmpty) {
           _initializeSingleBillStatus(billToSave);
         }
-        await _subscriptionService.localStorageService?.updateSubscription(
-          originalBill['localId'],
+
+        // Save to local storage in parallel
+        unawaited(_subscriptionService.localStorageService?.updateSubscription(
+          localId,
           billToSave,
-        );
-      } else {
-        // Create new local ID if needed
-        _bills[index]['localId'] = DateTime.now().millisecondsSinceEpoch
-            .toString();
-        final billToSave = Map<String, dynamic>.from(_bills[index]);
-        // Ensure status is properly set before saving
-        if (billToSave['status'] == null ||
-            billToSave['status'].toString().isEmpty) {
-          _initializeSingleBillStatus(billToSave);
-        }
-        await _subscriptionService.localStorageService?.saveSubscription(
-          billToSave,
-        );
+        ).then((_) {
+          debugPrint('✅ Updated bill in local storage');
+        }).catchError((error) {
+          debugPrint('❌ Failed to update local storage: $error');
+        }));
       }
 
-      // Update reminders
-      await _updateBillReminders(_bills[index]);
+      // Update reminders in parallel
+      unawaited(_updateBillReminders(_bills[index]).then((_) {
+        debugPrint('✅ Updated bill reminders');
+      }).catchError((error) {
+        debugPrint('❌ Failed to update reminders: $error');
+      }));
 
-      // Check connectivity
-      await _checkConnectivity();
+      // Check connectivity in parallel
+      unawaited(_checkConnectivity());
 
       if (_isOnline && billId != null) {
         // Update in Firebase with proper status
@@ -776,7 +806,99 @@ class HomeScreenState extends State<HomeScreen> {
 
   // Helper method to get bill ID consistently
   String? _getBillId(Map<String, dynamic> bill) {
-    return bill['id']?.toString() ?? bill['localId']?.toString() ?? bill['firebaseId']?.toString();
+    return bill['id']?.toString() ??
+        bill['localId']?.toString() ??
+        bill['firebaseId']?.toString();
+  }
+
+  // Helper method for smart due date display
+  String _getSmartDueDateText(DateTime? dueDate) {
+    if (dueDate == null) return 'No due date';
+
+    final now = DateTime.now();
+    final difference = dueDate.difference(now);
+    final days = difference.inDays;
+
+    if (days < 0) {
+      return 'Overdue';
+    } else if (days == 0) {
+      return 'Today';
+    } else if (days == 1) {
+      return 'Tomorrow';
+    } else if (days <= 7) {
+      return 'In $days days';
+    } else if (days <= 14) {
+      return 'In 1 week';
+    } else if (days <= 21) {
+      return 'In 2 weeks';
+    } else if (days <= 30) {
+      return 'In 3 weeks';
+    } else {
+      return '${dueDate.day}/${dueDate.month}/${dueDate.year}';
+    }
+  }
+
+  // Helper method to get vibrant colors for category icons
+  Color _getCategoryColor(String? categoryId) {
+    // Map of category IDs to vibrant colors
+    const categoryColors = {
+      'subscription': Colors.red,
+      'utilities': Colors.blue,
+      'entertainment': Colors.purple,
+      'food': Colors.orange,
+      'transport': Colors.green,
+      'health': Colors.pink,
+      'education': Colors.indigo,
+      'shopping': Colors.teal,
+      'insurance': Colors.amber,
+      'other': Colors.brown,
+    };
+
+    // If category ID exists in our map, return the corresponding color
+    if (categoryId != null && categoryColors.containsKey(categoryId)) {
+      return categoryColors[categoryId]!;
+    }
+
+    // If no specific color, generate one based on hash of category ID
+    if (categoryId != null) {
+      final hash = categoryId.hashCode;
+      final colors = [
+        Colors.red, Colors.blue, Colors.green, Colors.orange, Colors.purple,
+        Colors.pink, Colors.indigo, Colors.teal, Colors.amber, Colors.cyan,
+        Colors.deepOrange, Colors.lime, Colors.brown, Colors.grey
+      ];
+      return colors[hash.abs() % colors.length];
+    }
+
+    // Default color for uncategorized
+    return Colors.grey;
+  }
+
+  // Helper method to format frequency text
+  String _getFrequencyText(String? frequency) {
+    if (frequency == null || frequency.isEmpty) {
+      return 'One-time';
+    }
+
+    switch (frequency.toLowerCase()) {
+      case 'weekly':
+        return 'Weekly';
+      case 'bi-weekly':
+      case 'biweekly':
+        return 'Bi-weekly';
+      case 'monthly':
+        return 'Monthly';
+      case 'quarterly':
+        return 'Quarterly';
+      case 'semi-annual':
+      case 'semiannual':
+        return 'Semi-annual';
+      case 'annual':
+      case 'yearly':
+        return 'Annual';
+      default:
+        return frequency;
+    }
   }
 
   // Helper method to calculate reminder date based on reminder preference
@@ -1057,6 +1179,58 @@ class HomeScreenState extends State<HomeScreen> {
                                   );
                                 },
                               ),
+                              const SizedBox(width: 12),
+                              // Refresh button for manual sync
+                              GestureDetector(
+                                onTap: () async {
+                                  if (_isOnline) {
+                                    debugPrint(
+                                      '🔄 Manual refresh triggered...',
+                                    );
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Refreshing data...'),
+                                        backgroundColor: Colors.blue,
+                                        duration: Duration(seconds: 1),
+                                      ),
+                                    );
+                                    await _refreshDataFromFirebase();
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Data refreshed!'),
+                                        backgroundColor: Colors.green,
+                                        duration: Duration(seconds: 2),
+                                      ),
+                                    );
+                                  } else {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Cannot refresh while offline',
+                                        ),
+                                        backgroundColor: Colors.orange,
+                                        duration: Duration(seconds: 2),
+                                      ),
+                                    );
+                                  }
+                                },
+                                child: Column(
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 18,
+                                      backgroundColor: Colors.blue.withValues(
+                                        alpha: 0.15,
+                                      ),
+                                      child: Icon(
+                                        Icons.refresh,
+                                        color: Colors.blue,
+                                        size: 20,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                  ],
+                                ),
+                              ),
                               const SizedBox(width: 16),
                               // Profile (kept inside the same top row)
                               GestureDetector(
@@ -1091,7 +1265,7 @@ class HomeScreenState extends State<HomeScreen> {
                       ),
 
                       const SizedBox(height: 20),
-                     Row(
+                      Row(
                         children: [
                           Expanded(
                             child: BillSummaryCard(
@@ -1648,220 +1822,335 @@ class HomeScreenState extends State<HomeScreen> {
         ? Category.findById(bill['category'].toString())
         : null;
     final billId = _getBillId(bill);
-    final isMarkingThisBillPaid = _markingPaidBillId == billId;
-
-    // Determine status color and text
-    Color statusColor;
-    String statusText;
-    IconData statusIcon;
-
-    if (isPaid) {
-      statusColor = Colors.green;
-      statusText = 'Paid';
-      statusIcon = Icons.check_circle;
-    } else if (isOverdue) {
-      statusColor = Colors.red;
-      statusText = 'Overdue';
-      statusIcon = Icons.warning;
-    } else {
-      statusColor = Colors.orange;
-      statusText = 'Upcoming';
-      statusIcon = Icons.calendar_today;
-    }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       child: Card(
-        elevation: 2,
+        elevation: 3,
         shadowColor: Colors.black.withValues(alpha: 0.1),
+        color: Colors.white,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
           side: BorderSide(
             color: isOverdue
                 ? Colors.red.withValues(alpha: 0.3)
                 : Colors.transparent,
-            width: isOverdue ? 1 : 0,
+            width: isOverdue ? 1.5 : 0,
           ),
         ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header row with title and status
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Row(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () => _showBillManagementBottomSheet(context, bill, index),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Main content row
+                Row(
+                  children: [
+                    // Large category icon
+                    Container(
+                      width: 56,
+                      height: 56,
+                      decoration: BoxDecoration(
+                        color: _getCategoryColor(category?.id),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Icon(
+                        category?.icon ?? Icons.receipt,
+                        color: Colors.white,
+                        size: 28,
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+
+                    // Bill details
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Bill name
+                          Text(
+                            bill['name']?.toString() ?? 'Unnamed Bill',
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.black87,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+
+                          // Category name
+                          Text(
+                            category?.name ?? 'Uncategorized',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+
+                          // Frequency
+                          Text(
+                            _getFrequencyText(bill['frequency']?.toString()),
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w400,
+                              color: Colors.grey[500],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Amount and status
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        // Category icon
-                        Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color:
-                                category?.backgroundColor ?? Colors.grey[200],
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Icon(
-                            category?.icon ?? Icons.receipt,
-                            color: category?.color ?? Colors.grey[700],
-                            size: 20,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        // Bill name and amount
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                bill['name']?.toString() ?? 'Unnamed Bill',
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.black87,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                '\$${bill['amount']?.toString() ?? '0.00'}',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500,
-                                  color: Colors.grey[700],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  // Status indicator
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: statusColor.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(statusIcon, color: statusColor, size: 14),
-                        const SizedBox(width: 4),
                         Text(
-                          statusText,
+                          '\$${bill['amount']?.toString() ?? '0.00'}',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: isOverdue ? Colors.red : Colors.black87,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        // Status text below amount
+                        Text(
+                          isPaid ? 'Paid' :
+                                 isOverdue ? 'Overdue' :
+                                 _getSmartDueDateText(dueDate),
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
-                            color: statusColor,
+                            color: isPaid ? Colors.green :
+                                   isOverdue ? Colors.red :
+                                   Colors.blue[700],
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        // Manage text button
+                        GestureDetector(
+                          onTap: () => _showBillManagementBottomSheet(context, bill, index),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              'Manage',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.blue[700],
+                              ),
+                            ),
                           ),
                         ),
                       ],
                     ),
-                  ),
-                ],
-              ),
-
-              // Divider
-              const SizedBox(height: 12),
-              const Divider(height: 1),
-
-              // Due date and actions row
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  // Due date
-                  Row(
-                    children: [
-                      Icon(Icons.event, size: 16, color: Colors.grey[600]),
-                      const SizedBox(width: 6),
-                      Text(
-                        dueDate != null
-                            ? '${dueDate.day.toString().padLeft(2, '0')}/${dueDate.month.toString().padLeft(2, '0')}/${dueDate.year}'
-                            : 'No due date',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.grey[700],
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  // Action buttons
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (!isPaid)
-                        TextButton.icon(
-                          onPressed: () async {
-                            if (isMarkingThisBillPaid) return;
-
-                            bool? confirm = await _showMarkAsPaidConfirmDialog(
-                              context,
-                              bill['name']?.toString() ?? 'this bill',
-                            );
-                            if (confirm == true) {
-                              await _markBillAsPaid(index);
-                            }
-                          },
-                          icon: isMarkingThisBillPaid
-                              ? SizedBox(
-                                  width: 12,
-                                  height: 12,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                      Colors.green,
-                                    ),
-                                  ),
-                                )
-                              : const Icon(Icons.check, size: 16),
-                          label: isMarkingThisBillPaid
-                              ? const SizedBox(
-                                  width: 12,
-                                  height: 12,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                      Colors.green,
-                                    ),
-                                  ),
-                                )
-                              : const Text('Pay'),
-                          style: TextButton.styleFrom(
-                            foregroundColor: Colors.green,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                          ),
-                        ),
-                      const SizedBox(width: 8),
-                      IconButton(
-                        onPressed: () async {
-                          await _editBill(index);
-                        },
-                        icon: const Icon(Icons.edit, size: 16),
-                        style: IconButton.styleFrom(
-                          foregroundColor: Colors.blue,
-                          padding: const EdgeInsets.all(4),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ],
+                  ],
+                ),
+              ],
+            ),
           ),
+        ),
+      ),
+    );
+  }
+
+  // Modern bottom sheet for bill management actions
+  void _showBillManagementBottomSheet(BuildContext context, Map<String, dynamic> bill, int index) {
+    final isPaid = bill['status'] == 'paid';
+    final isOverdue = _parseDueDate(bill)?.isBefore(DateTime.now()) == true && !isPaid;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Handle bar
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // Bill info header
+            Row(
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        isOverdue ? Colors.red : Colors.blue,
+                        isOverdue ? Colors.red.withValues(alpha: 0.7) : Colors.blue.withValues(alpha: 0.7),
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.receipt,
+                    color: Colors.white,
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        bill['name']?.toString() ?? 'Unknown Bill',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF1F2937),
+                        ),
+                      ),
+                      Text(
+                        '\$${bill['amount']?.toString() ?? '0.0'}',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: isOverdue ? Colors.red : const Color(0xFF1F2937),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+
+            // Action buttons
+            if (!isPaid) ...[
+              // Mark as Paid button
+              Container(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () async {
+                    Navigator.pop(context);
+                    bool? confirm = await _showMarkAsPaidConfirmDialog(
+                      context,
+                      bill['name']?.toString() ?? 'this bill',
+                    );
+                    if (confirm == true) {
+                      await _markBillAsPaid(index);
+                    }
+                  },
+                  icon: const Icon(Icons.check_circle, size: 20),
+                  label: const Text('Mark as Paid'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    elevation: 0,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+
+            // Edit button
+            Container(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () async {
+                  Navigator.pop(context);
+                  await _editBill(index);
+                },
+                icon: const Icon(Icons.edit, size: 20),
+                label: const Text('Edit Bill'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF3B82F6),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 0,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            // Delete button
+            Container(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () async {
+                  Navigator.pop(context);
+                  bool? confirm = await _showDeleteConfirmDialog(context);
+                  if (confirm == true) {
+                    _deleteBill(index);
+                  }
+                },
+                icon: const Icon(Icons.delete, size: 20),
+                label: const Text('Delete Bill'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 0,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Cancel button
+            Container(
+              width: double.infinity,
+              child: TextButton(
+                onPressed: () => Navigator.pop(context),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(color: Colors.grey[300]!),
+                  ),
+                ),
+                child: const Text(
+                  'Cancel',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF6B7280),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
         ),
       ),
     );
@@ -2479,6 +2768,7 @@ class HomeScreenState extends State<HomeScreen> {
       '📝 Edit mode: $isEditMode, bill: ${bill?['name']}, editIndex: $editIndex',
     );
 
+  
     // Declare variables outside StatefulBuilder to maintain state
     final formKey = GlobalKey<FormState>();
     late final TextEditingController nameController;
@@ -2580,7 +2870,14 @@ class HomeScreenState extends State<HomeScreen> {
       selectedReminder = bill?['reminder'] ?? 'Same day';
     }
 
-    await showModalBottomSheet(
+    // Reset loading state before showing bottom sheet
+    if (mounted) {
+      setState(() {
+        _isAddingBill = false;
+      });
+    }
+
+    final result = await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -2601,10 +2898,20 @@ class HomeScreenState extends State<HomeScreen> {
               ),
               child: Form(
                 key: formKey,
-                child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
+                child: WillPopScope(
+                  onWillPop: () async {
+                    // Reset loading state when bottom sheet is dismissed
+                    if (mounted) {
+                      this.setState(() {
+                        _isAddingBill = false;
+                      });
+                    }
+                    return true;
+                  },
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                       Row(
                         children: [
                           Container(
@@ -3423,12 +3730,31 @@ class HomeScreenState extends State<HomeScreen> {
                               onPressed: () async {
                                 if (_isAddingBill) return;
 
+                                // Set loading state immediately
                                 setState(() {
                                   _isAddingBill = true;
                                 });
 
+                                // Also update the main screen state
+                                if (mounted) {
+                                  this.setState(() {
+                                    _isAddingBill = true;
+                                  });
+                                }
+
                                 try {
                                   if (formKey.currentState!.validate()) {
+                                    // Quick validation first
+                                    if (nameController.text.trim().isEmpty) {
+                                      throw Exception('Bill name is required');
+                                    }
+                                    if (amountController.text.trim().isEmpty) {
+                                      throw Exception('Amount is required');
+                                    }
+                                    if (dueDateController.text.trim().isEmpty) {
+                                      throw Exception('Due date is required');
+                                    }
+
                                     // Ensure we have a time set (default to user's preferred time if not selected)
                                     if (selectedTime == null) {
                                       selectedTime =
@@ -3455,53 +3781,12 @@ class HomeScreenState extends State<HomeScreen> {
                                           ' ${selectedTime!.format(context)}';
                                     }
 
-                                    // Schedule notification if reminder time is selected
-                                    if (selectedReminderTime != null &&
-                                        selectedReminder != 'No reminder') {
-                                      // Calculate the actual reminder date based on the reminder preference
-                                      DateTime reminderDate;
-                                      if (selectedDate != null) {
-                                        reminderDate = _calculateReminderDate(
-                                          selectedDate!,
-                                          selectedReminder,
-                                        );
-                                      } else {
-                                        reminderDate = DateTime.now();
-                                      }
-
-                                      // Set the reminder time (separate from due time)
-                                      final reminderDateTime = DateTime(
-                                        reminderDate.year,
-                                        reminderDate.month,
-                                        reminderDate.day,
-                                        selectedReminderTime!.hour,
-                                        selectedReminderTime!.minute,
-                                      );
-
-                                      // Only schedule if the reminder time is in the future
-                                      if (reminderDateTime.isAfter(
-                                        DateTime.now(),
-                                      )) {
-                                        await NotificationService()
-                                            .scheduleNotification(
-                                              id:
-                                                  DateTime.now()
-                                                      .millisecondsSinceEpoch ~/
-                                                  1000,
-                                              title:
-                                                  'Bill Reminder: ${nameController.text}',
-                                              body:
-                                                  'Your bill for ${nameController.text} of ${amountController.text} is due soon!',
-                                              scheduledTime: reminderDateTime,
-                                            );
-                                      }
-                                    }
-
+                                    // Create subscription data object
                                     final subscription = {
-                                      'name': nameController.text,
-                                      'amount': amountController.text,
-                                      'dueDate': dueDateController.text,
-                                      'dueTime': dueTimeController.text,
+                                      'name': nameController.text.trim(),
+                                      'amount': amountController.text.trim(),
+                                      'dueDate': dueDateController.text.trim(),
+                                      'dueTime': dueTimeController.text.trim(),
                                       'dueDateTime': selectedDate
                                           ?.toIso8601String(),
                                       'reminderTime':
@@ -3517,22 +3802,21 @@ class HomeScreenState extends State<HomeScreen> {
                                       'categoryBackgroundColor':
                                           selectedCategory.backgroundColor
                                               .toARGB32(),
-                                      'notes': notesController.text.isEmpty
+                                      'notes': notesController.text.trim().isEmpty
                                           ? null
-                                          : notesController.text,
+                                          : notesController.text.trim(),
+                                      'status': 'upcoming', // Set initial status
+                                      'createdAt': DateTime.now().toIso8601String(),
+                                      'lastModified': DateTime.now().toIso8601String(),
                                     };
-                                    if (isEditMode &&
-                                        currentEditIndex != null) {
-                                      await _updateBill(
-                                        currentEditIndex,
-                                        subscription,
-                                      );
-                                    } else {
-                                      await _addSubscription(subscription);
-                                    }
+
+                                    // Close bottom sheet first for better UX
                                     if (mounted) {
                                       Navigator.pop(context);
                                     }
+
+                                    // Then process the save operation in background
+                                    unawaited(_processBillSave(isEditMode, currentEditIndex, subscription, selectedReminderTime, selectedReminder, selectedDate, nameController.text, amountController.text));
                                   }
                                 } catch (e) {
                                   debugPrint('Error adding bill: $e');
@@ -3553,8 +3837,12 @@ class HomeScreenState extends State<HomeScreen> {
                                     );
                                   }
                                 } finally {
+                                  // Reset loading state
                                   if (mounted) {
                                     setState(() {
+                                      _isAddingBill = false;
+                                    });
+                                    this.setState(() {
                                       _isAddingBill = false;
                                     });
                                   }
@@ -3595,95 +3883,117 @@ class HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ),
-          );
+          ));
         },
       ),
     );
+
+    // Handle bottom sheet dismissal - always reset loading state
+    if (mounted) {
+      setState(() {
+        _isAddingBill = false;
+      });
+    }
   }
 
-  Future<void> _addSubscription(Map<String, dynamic> subscription) async {
-    // Check network status first
-    await _checkConnectivity();
-    debugPrint('Adding subscription. Network status: $_isOnline');
+  // Process bill save operation in background for better UX
+  Future<void> _processBillSave(
+    bool isEditMode,
+    int? currentEditIndex,
+    Map<String, dynamic> subscription,
+    TimeOfDay? selectedReminderTime,
+    String selectedReminder,
+    DateTime? selectedDate,
+    String billName,
+    String billAmount,
+  ) async {
+    try {
+      debugPrint('🚀 Processing bill save in background...');
 
-    // Ensure status is properly set before saving
-    _initializeSingleBillStatus(subscription);
-
-    if (_isOnline) {
-      try {
-        // Try to add to Firebase first
-        await _subscriptionService.addSubscription(subscription);
-
-        // If successful, refresh from local to ensure consistency
-        if (mounted) {
-          await _refreshBillsForCategory(); // Refresh from local storage
-          _initializeBillStatuses(); // Initialize all bill statuses
-          _checkForOverdueBills(); // Immediate check for overdue status
-
-          // Show success message
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('${subscription['name']} added successfully!'),
-              backgroundColor: Colors.green,
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
+      // Schedule notification if reminder time is selected
+      if (selectedReminderTime != null &&
+          selectedReminder != 'No reminder') {
+        // Calculate the actual reminder date based on the reminder preference
+        DateTime reminderDate;
+        if (selectedDate != null) {
+          reminderDate = _calculateReminderDate(
+            selectedDate,
+            selectedReminder,
           );
-        }
-      } catch (e) {
-        // Re-check connectivity to make sure it's actually offline
-        await _checkConnectivity();
-
-        if (!_isOnline) {
-          // Only show offline message if actually offline
-          if (mounted) {
-            await _refreshBillsForCategory(); // Refresh from local storage
-            _checkForOverdueBills(); // Immediate check for overdue status
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  '${subscription['name']} saved locally. Will sync when online.',
-                ),
-                backgroundColor: Colors.orange,
-                behavior: SnackBarBehavior.floating,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-            );
-          }
         } else {
-          // If online but Firebase failed, show error message
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Failed to save to server. Please try again.'),
-                backgroundColor: Colors.red,
-                behavior: SnackBarBehavior.floating,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-            );
-          }
+          reminderDate = DateTime.now();
+        }
+
+        // Set the reminder time (separate from due time)
+        final reminderDateTime = DateTime(
+          reminderDate.year,
+          reminderDate.month,
+          reminderDate.day,
+          selectedReminderTime.hour,
+          selectedReminderTime.minute,
+        );
+
+        // Only schedule if the reminder time is in the future
+        if (reminderDateTime.isAfter(
+          DateTime.now(),
+        )) {
+          await NotificationService()
+              .scheduleNotification(
+                id:
+                    DateTime.now()
+                        .millisecondsSinceEpoch ~/
+                    1000,
+                title:
+                    'Bill Reminder: $billName',
+                body:
+                    'Your bill for $billName of $billAmount is due soon!',
+                scheduledTime: reminderDateTime,
+              );
         }
       }
-    } else {
-      // Offline: Add to local list only
+
+      // Save to storage using optimized approach similar to paid functionality
+      if (isEditMode && currentEditIndex != null) {
+        // Update UI immediately for faster feedback
+        if (mounted && currentEditIndex < _bills.length) {
+          setState(() {
+            _bills[currentEditIndex] = subscription;
+          });
+        }
+
+        // Save to local storage in parallel
+        unawaited(_updateBill(currentEditIndex, subscription).then((_) {
+          debugPrint('✅ Updated bill in storage for $billName');
+        }).catchError((error) {
+          debugPrint('❌ Failed to update bill: $error');
+        }));
+      } else {
+        // Add to UI immediately for faster feedback
+        if (mounted) {
+          setState(() {
+            _bills.add(subscription);
+          });
+        }
+
+        // Save to storage in parallel
+        unawaited(_addSubscription(subscription).then((_) {
+          debugPrint('✅ Added bill to storage for $billName');
+        }).catchError((error) {
+          debugPrint('❌ Failed to add bill: $error');
+        }));
+      }
+
+      debugPrint('✅ Bill save completed successfully');
+    } catch (e) {
+      debugPrint('❌ Error in background bill save: $e');
+      // Show error message if still on screen
       if (mounted) {
-        setState(() {
-          _bills.add(subscription);
-          _initializeBillStatuses(); // Initialize all bill statuses
-          _checkForOverdueBills(); // Immediate check for overdue status
-        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              '${subscription['name']} saved locally. Will sync when online.',
+              'Error saving bill: ${e.toString()}',
             ),
-            backgroundColor: Colors.orange,
+            backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8),
@@ -3691,7 +4001,98 @@ class HomeScreenState extends State<HomeScreen> {
           ),
         );
       }
+    } finally {
+      // Ensure loading state is reset
+      if (mounted) {
+        setState(() {
+          _isAddingBill = false;
+        });
+      }
     }
+  }
+
+  Future<void> _addSubscription(Map<String, dynamic> subscription) async {
+    // Ensure status is properly set before saving
+    _initializeSingleBillStatus(subscription);
+
+    // Note: UI is already updated by the calling method for immediate feedback
+
+    // Check network status and save in parallel (optimized like paid functionality)
+    unawaited(_checkConnectivity().then((_) async {
+      debugPrint('Adding subscription. Network status: $_isOnline');
+
+      if (_isOnline) {
+        try {
+          // Try to add to Firebase first
+          await _subscriptionService.addSubscription(subscription);
+
+          // If successful, show success message
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('${subscription['name']} added successfully!'),
+                backgroundColor: Colors.green,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            );
+          }
+        } catch (e) {
+          // Re-check connectivity to make sure it's actually offline
+          await _checkConnectivity();
+
+          if (!_isOnline) {
+            // Only show offline message if actually offline
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    '${subscription['name']} saved locally. Will sync when online.',
+                  ),
+                  backgroundColor: Colors.orange,
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              );
+            }
+          } else {
+            // If online but Firebase failed, show error message
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Failed to save to server. Please try again.'),
+                  backgroundColor: Colors.red,
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              );
+            }
+          }
+        }
+      } else {
+        // Offline: Show offline message
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '${subscription['name']} saved locally. Will sync when online.',
+              ),
+              backgroundColor: Colors.orange,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          );
+        }
+      }
+    }));
   }
 
   void showCategoryBillsBottomSheet(BuildContext context, Category category) {
@@ -3736,7 +4137,109 @@ class HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Load ONLY from local storage - fast and minimal Firebase usage
+  // Load data with local-first approach
+  Future<void> _loadDataWithSyncPriority() async {
+    if (!mounted) return;
+
+    debugPrint(
+      '🔄 Loading data with local-first approach...',
+    );
+
+    try {
+      // Always load from local storage first (fastest)
+      debugPrint('📱 Loading from local storage...');
+      final subscriptions = await _subscriptionService.getSubscriptions();
+      debugPrint('✅ Loaded ${subscriptions.length} bills from local storage');
+
+      // Filter out invalid/ghost bills - only show bills that have proper IDs
+      final filteredSubscriptions = subscriptions.where((bill) {
+        final hasValidId =
+            bill['id'] != null && bill['id'].toString().isNotEmpty;
+        final hasFirebaseId =
+            bill['firebaseId'] != null &&
+            bill['firebaseId'].toString().isNotEmpty;
+        final hasLocalId =
+            bill['localId'] != null && bill['localId'].toString().isNotEmpty;
+        final hasName =
+            bill['name'] != null && bill['name'].toString().isNotEmpty;
+
+        // Keep if it has valid Firebase ID OR valid local ID with name
+        final isValid = hasFirebaseId || (hasLocalId && hasName);
+
+        if (!isValid) {
+          debugPrint(
+            '🗑️ Filtering out invalid bill: ${bill['name']} (ID: ${bill['id']}, FirebaseID: ${bill['firebaseId']}, LocalID: ${bill['localId']})',
+          );
+        }
+
+        return isValid;
+      }).toList();
+
+      if (mounted) {
+        setState(() {
+          _bills = filteredSubscriptions;
+          _isLoading = false;
+        });
+        debugPrint(
+          '✅ Final loaded ${_bills.length} valid bills (filtered from ${subscriptions.length} total)',
+        );
+
+        // Initialize bill statuses
+        _initializeBillStatuses();
+
+        // Trigger background sync if needed
+        unawaited(_subscriptionService.performPeriodicSync());
+      }
+    } catch (e) {
+      debugPrint('❌ Data load failed: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _hasError = true;
+        });
+      }
+    }
+  }
+
+  // Sync local storage with Firebase (background operation)
+  Future<void> _syncLocalWithFirebase() async {
+    try {
+      debugPrint('🔄 Starting background sync with Firebase...');
+
+      // Get unsynced count
+      final unsyncedCount = await _subscriptionService
+          .getUnsyncedSubscriptionsCount();
+
+      if (unsyncedCount > 0) {
+        debugPrint('🔄 Found $unsyncedCount unsynced items, syncing now...');
+        final success = await _subscriptionService.syncLocalToFirebase();
+
+        if (success) {
+          debugPrint('✅ Background sync completed successfully');
+
+          // Refresh data after sync to get any changes from other devices
+          final updatedSubscriptions = await _subscriptionService
+              .getSubscriptions();
+          if (mounted) {
+            setState(() {
+              _bills = updatedSubscriptions;
+            });
+            debugPrint(
+              '✅ Refreshed data after sync - now have ${_bills.length} bills',
+            );
+          }
+        } else {
+          debugPrint('⚠️ Background sync had some issues');
+        }
+      } else {
+        debugPrint('✅ No unsynced items, local storage is up to date');
+      }
+    } catch (e) {
+      debugPrint('❌ Background sync failed: $e');
+    }
+  }
+
+  // Load ONLY from local storage - fast and minimal Firebase usage (fallback)
   Future<void> _loadFromLocalStorageOnly() async {
     if (!mounted) return;
 

@@ -25,262 +25,209 @@ class SubscriptionService {
   // Get local storage service for direct access
   LocalStorageService? get localStorageService => _localStorageService;
 
-  // Add a new subscription with offline support - OPTIMIZED for cross-device access
+  // Add a new subscription with LOCAL-FIRST approach
   Future<void> addSubscription(Map<String, dynamic> subscription) async {
-    // ALWAYS save locally first (immediate UI response)
+    // Save locally first (immediate UI response)
     await _localStorageService?.saveSubscription(subscription);
-    debugPrint('✅ Saved locally first');
+    debugPrint('✅ Saved locally - operation complete for UI');
 
-    // THEN try to sync with Firebase if online (for cross-device access)
-    final online = await isOnline();
-    if (online) {
-      try {
-        debugPrint('🌐 Online, attempting Firebase sync for cross-device access...');
+    // No immediate Firebase sync - will be handled by batch sync
+    debugPrint('📝 Queued for sync - will sync in batch when online');
+  }
 
-        final subscriptionForFirebase = Map<String, dynamic>.from(subscription);
-        subscriptionForFirebase['createdAt'] = FieldValue.serverTimestamp();
-        subscriptionForFirebase['updatedAt'] = FieldValue.serverTimestamp();
-        subscriptionForFirebase.remove('localId'); // Don't store local ID in Firebase
-        subscriptionForFirebase.remove('source'); // Don't store source in Firebase
-
-        final docRef = await _subscriptionsCollection.add(subscriptionForFirebase);
-
-        // Update local copy with Firebase ID for future sync
-        subscription['firebaseId'] = docRef.id;
-        subscription['id'] = docRef.id;
-        await _localStorageService?.updateSubscription(subscription['localId'], subscription);
-
-        await _localStorageService?.setLastSync();
-        debugPrint('✅ Successfully synced to Firebase - available on other devices!');
-
-      } catch (e) {
-        debugPrint('⚠️ Firebase sync failed, but saved locally: $e');
-        // Data is safe locally, just not available on other devices yet
-        throw Exception('Saved locally. Will sync to cloud when online.');
+  // Get ONLY Firebase subscriptions (clean data source)
+  Future<List<Map<String, dynamic>>> getFirebaseSubscriptionsOnly() async {
+    try {
+      final online = await isOnline();
+      if (!online) {
+        debugPrint('Offline: Cannot get Firebase subscriptions');
+        return [];
       }
-    } else {
-      debugPrint('📵 Offline - saved locally only. Will sync when online for cross-device access.');
-      throw Exception('Offline mode: Saved locally. Will sync when online for other devices.');
+
+      debugPrint('🌐 Getting Firebase subscriptions only...');
+      final querySnapshot = await _subscriptionsCollection
+          .orderBy('createdAt', descending: true)
+          .get();
+
+      final firebaseSubscriptions = querySnapshot.docs.map((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        data['id'] = doc.id;
+        data['firebaseId'] = doc.id;
+        data['source'] = 'firebase';
+        return data;
+      }).toList();
+
+      debugPrint('✅ Got ${firebaseSubscriptions.length} subscriptions from Firebase');
+      return firebaseSubscriptions;
+    } catch (e) {
+      debugPrint('❌ Failed to get Firebase subscriptions: $e');
+      return [];
     }
   }
 
-  // Get subscriptions from Firebase and merge with local
+  // Get subscriptions from LOCAL storage only (local-first approach)
   Future<List<Map<String, dynamic>>> getSubscriptions() async {
     try {
-      List<Map<String, dynamic>> allSubscriptions = [];
+      // Get active subscriptions from local storage only
+      final localSubscriptions = await _localStorageService?.getActiveSubscriptions() ?? [];
 
-      // Check connectivity to avoid unnecessary Firebase reads
-      final online = await isOnline();
+      debugPrint('📱 Getting ${localSubscriptions.length} subscriptions from local storage');
 
-      if (online) {
-        // Try to get from Firebase
-        try {
-          final querySnapshot = await _subscriptionsCollection
-              .orderBy('createdAt', descending: true)
-              .get();
-
-          final firebaseSubscriptions = querySnapshot.docs.map((doc) {
-            final data = doc.data() as Map<String, dynamic>;
-            data['id'] = doc.id;
-            data['firebaseId'] = doc.id;
-            data['source'] = 'firebase';
-            return data;
-          }).toList();
-
-          allSubscriptions.addAll(firebaseSubscriptions);
-        } catch (e) {
-          debugPrint('Failed to get Firebase subscriptions: $e');
-        }
-      } else {
-        debugPrint('Offline detected: skipping Firebase read in getSubscriptions');
-      }
-
-      // Get local subscriptions that aren't synced
-      final localSubscriptions = await _localStorageService?.getSubscriptions() ?? [];
-      final unsyncedSubscriptions = localSubscriptions.where((local) =>
-        !allSubscriptions.any((firebase) =>
-          firebase['name'] == local['name'] &&
-          firebase['dueDate'] == local['dueDate']
-        )
-      ).map((sub) {
-        sub['source'] = 'local';
-        return sub;
-      }).toList();
-
-      allSubscriptions.addAll(unsyncedSubscriptions);
-
-      // Sort by creation date
-      allSubscriptions.sort((a, b) {
-        final aDate = a['createdAt'] is Timestamp ? (a['createdAt'] as Timestamp).toDate() : DateTime.now();
-        final bDate = b['createdAt'] is Timestamp ? (b['createdAt'] as Timestamp).toDate() : DateTime.now();
-        return bDate.compareTo(aDate);
-      });
-
-      return allSubscriptions;
-    } catch (e) {
-      // If everything fails, return only local subscriptions
-      debugPrint('All sources failed, returning local only: $e');
-      final localSubscriptions = await _localStorageService?.getSubscriptions() ?? [];
       return localSubscriptions.map((sub) {
         sub['source'] = 'local';
         return sub;
       }).toList();
+    } catch (e) {
+      debugPrint('Failed to get local subscriptions: $e');
+      return [];
     }
   }
 
-  // Update a subscription with MOBILE debugging
+  // Update a subscription with LOCAL-FIRST approach
   Future<void> updateSubscription(String id, Map<String, dynamic> subscription) async {
     try {
-      subscription['updatedAt'] = FieldValue.serverTimestamp();
+      debugPrint('📱 Updating subscription locally: $id');
 
-      // MOBILE DEBUG: Print detailed information
-      debugPrint('📱 MOBILE DEBUG: Updating subscription');
-      debugPrint('📱 MOBILE DEBUG: Input ID: $id');
-      debugPrint('📱 MOBILE DEBUG: ID type: ${id.startsWith('sub_') || id.length > 20 ? 'Firebase ID' : 'Local ID'}');
-      debugPrint('📱 MOBILE DEBUG: Subscription keys: ${subscription.keys.toList()}');
+      // Always update locally first
+      await _localStorageService?.updateSubscription(id, subscription);
+      debugPrint('✅ Updated subscription in local storage');
 
-      // Determine if this is a Firebase ID or local ID
-      String? firebaseId;
-      String? localId;
-
-      if (id.startsWith('sub_') || id.length > 20) {
-        // Likely a Firebase ID
-        firebaseId = id;
-        debugPrint('📱 MOBILE DEBUG: Identified as Firebase ID: $firebaseId');
-      } else {
-        // Likely a local ID, need to find the corresponding Firebase ID
-        debugPrint('📱 MOBILE DEBUG: Looking up Firebase ID for local ID: $id');
-        final subscriptions = await _localStorageService?.getSubscriptions();
-        final localSub = subscriptions?.firstWhere(
-          (sub) => sub['localId'] == id || sub['id'] == id,
-          orElse: () => {},
-        );
-        firebaseId = localSub?['firebaseId'];
-        localId = localSub?['localId'] ?? id;
-        debugPrint('📱 MOBILE DEBUG: Found Firebase ID: $firebaseId, Local ID: $localId');
-      }
-
-      // Try Firebase first if we have a Firebase ID
-      if (firebaseId != null) {
-        try {
-          debugPrint('📱 MOBILE DEBUG: Attempting Firebase update with ID: $firebaseId');
-          await _subscriptionsCollection.doc(firebaseId).update(subscription);
-          debugPrint('✅ Updated subscription in Firebase with ID: $firebaseId');
-        } catch (firebaseError) {
-          debugPrint('📱 MOBILE DEBUG: Firebase update failed: $firebaseError');
-          throw firebaseError;
-        }
-      }
-
-      // Always update locally with the correct local ID
-      if (localId != null) {
-        try {
-          debugPrint('📱 MOBILE DEBUG: Updating local storage with ID: $localId');
-          await _localStorageService?.updateSubscription(localId, subscription);
-          debugPrint('✅ Updated subscription in local storage with ID: $localId');
-        } catch (localError) {
-          debugPrint('📱 MOBILE DEBUG: Local storage update failed: $localError');
-        }
-      } else if (firebaseId == null) {
-        // If no Firebase ID, use the original ID for local storage
-        try {
-          debugPrint('📱 MOBILE DEBUG: Updating local storage with original ID: $id');
-          await _localStorageService?.updateSubscription(id, subscription);
-          debugPrint('✅ Updated subscription in local storage with original ID: $id');
-        } catch (localError) {
-          debugPrint('📱 MOBILE DEBUG: Local storage update failed: $localError');
-        }
-      }
+      // No immediate Firebase sync - will be handled by batch sync
+      debugPrint('📝 Update queued for sync');
 
     } catch (e) {
-      // If Firebase fails, update locally only
-      debugPrint('📱 MOBILE DEBUG: Firebase update failed: $e. Updating locally only.');
-      try {
-        await _localStorageService?.updateSubscription(id, subscription);
-        debugPrint('📱 MOBILE DEBUG: Successfully updated locally after Firebase failure');
-      } catch (localError) {
-        debugPrint('📱 MOBILE DEBUG: Local update also failed: $localError');
-      }
-      throw Exception('Offline mode: Updated locally. Will sync when online.');
+      debugPrint('❌ Failed to update subscription: $e');
+      throw Exception('Failed to update subscription: $e');
     }
   }
 
-  // Delete a subscription
+  // Delete a subscription with LOCAL-FIRST approach
   Future<void> deleteSubscription(String id) async {
     try {
-      // Try Firebase first
-      await _subscriptionsCollection.doc(id).delete();
+      debugPrint('📱 Deleting subscription locally: $id');
 
-      // Delete locally
+      // Delete locally first
       await _localStorageService?.deleteSubscription(id);
+      debugPrint('✅ Deleted subscription in local storage');
+
+      // No immediate Firebase sync - will be handled by batch sync
+      debugPrint('📝 Deletion queued for sync');
 
     } catch (e) {
-      // If Firebase fails, delete locally only
-      debugPrint('Firebase delete failed: $e. Deleting locally only.');
-      await _localStorageService?.deleteSubscription(id);
-      throw Exception('Offline mode: Deleted locally. Will sync when online.');
+      debugPrint('❌ Failed to delete subscription: $e');
+      throw Exception('Failed to delete subscription: $e');
     }
   }
 
-  // Sync local subscriptions to Firebase
+  // Batch sync local subscriptions to Firebase (optimized for reduced usage)
   Future<bool> syncLocalToFirebase() async {
     try {
-      final unsyncedSubscriptions = await _localStorageService?.getUnsyncedSubscriptions() ?? [];
-
-      if (unsyncedSubscriptions.isEmpty) {
-        return true; // Nothing to sync
+      // Check if online first
+      if (!await isOnline()) {
+        debugPrint('📵 Offline - skipping sync');
+        return false;
       }
 
+      final unsyncedSubscriptions = await _localStorageService?.getUnsyncedSubscriptions() ?? [];
+      final deletedSubscriptions = await _localStorageService?.getDeletedSubscriptions() ?? [];
+
+      if (unsyncedSubscriptions.isEmpty && deletedSubscriptions.isEmpty) {
+        debugPrint('✅ No changes to sync');
+        return true;
+      }
+
+      debugPrint('🔄 Syncing ${unsyncedSubscriptions.length} updates and ${deletedSubscriptions.length} deletions');
+
       bool hasErrors = false;
+      final List<Map<String, dynamic>> successfullySynced = [];
+
+      // Sync updated subscriptions in batch
+      final batch = _firestore.batch();
 
       for (final subscription in unsyncedSubscriptions) {
         try {
           final subscriptionToSync = Map<String, dynamic>.from(subscription);
-
-          // Check if this is a new subscription or an edited one
           final hasFirebaseId = subscription.containsKey('firebaseId') && subscription['firebaseId'] != null;
 
+          // Remove local-only fields
+          subscriptionToSync.remove('localId');
+          subscriptionToSync.remove('source');
+          subscriptionToSync.remove('syncPending');
+          subscriptionToSync.remove('lastModified');
+          subscriptionToSync.remove('lastSynced');
+
           if (hasFirebaseId) {
-            // This is an edited subscription - update the existing document
+            // Update existing document
             final firebaseId = subscription['firebaseId'];
-            subscriptionToSync.remove('localId');
-            subscriptionToSync.remove('source');
-            subscriptionToSync.remove('needsSync');
             subscriptionToSync['updatedAt'] = FieldValue.serverTimestamp();
+            batch.update(_subscriptionsCollection.doc(firebaseId), subscriptionToSync);
 
-            await _subscriptionsCollection.doc(firebaseId).update(subscriptionToSync);
-            debugPrint('✅ Updated existing subscription: ${subscription['name']} (ID: $firebaseId)');
+            successfullySynced.add({
+              'localId': subscription['localId'],
+              'firebaseId': firebaseId,
+            });
 
-            // Mark as synced
-            await _localStorageService?.markAsSynced(subscription['localId'], firebaseId);
+            debugPrint('📝 Queued update: ${subscription['name']}');
           } else {
-            // This is a new subscription - create a new document
-            subscriptionToSync.remove('localId');
-            subscriptionToSync.remove('source');
-            subscriptionToSync.remove('needsSync');
+            // Create new document
             subscriptionToSync['createdAt'] = FieldValue.serverTimestamp();
             subscriptionToSync['updatedAt'] = FieldValue.serverTimestamp();
+            final docRef = _subscriptionsCollection.doc();
+            batch.set(docRef, subscriptionToSync);
 
-            final docRef = await _subscriptionsCollection.add(subscriptionToSync);
-            debugPrint('✅ Created new subscription: ${subscription['name']} (ID: ${docRef.id})');
+            successfullySynced.add({
+              'localId': subscription['localId'],
+              'firebaseId': docRef.id,
+            });
 
-            // Mark as synced
-            await _localStorageService?.markAsSynced(subscription['localId'], docRef.id);
+            debugPrint('📝 Queued creation: ${subscription['name']}');
           }
-
         } catch (e) {
-          debugPrint('Failed to sync subscription ${subscription['name']}: $e');
+          debugPrint('❌ Failed to prepare subscription ${subscription['name']}: $e');
           hasErrors = true;
         }
       }
 
-      if (!hasErrors) {
-        await _localStorageService?.setLastSync();
+      // Handle deletions
+      for (final subscription in deletedSubscriptions) {
+        try {
+          final firebaseId = subscription['firebaseId'];
+          batch.delete(_subscriptionsCollection.doc(firebaseId));
+          debugPrint('📝 Queued deletion: ${subscription['name']}');
+        } catch (e) {
+          debugPrint('❌ Failed to prepare deletion ${subscription['name']}: $e');
+          hasErrors = true;
+        }
       }
 
-      return !hasErrors;
+      // Commit the batch
+      try {
+        await batch.commit();
+        debugPrint('✅ Batch sync completed successfully');
+
+        // Mark synced items as synced
+        if (successfullySynced.isNotEmpty) {
+          await _localStorageService?.markBatchAsSynced(successfullySynced);
+        }
+
+        // Clean up deleted subscriptions
+        final deletedFirebaseIds = deletedSubscriptions
+            .map((sub) => sub['firebaseId'] as String)
+            .toList();
+        if (deletedFirebaseIds.isNotEmpty) {
+          await _localStorageService?.cleanupDeletedSubscriptions(deletedFirebaseIds);
+        }
+
+        // Update last sync time
+        await _localStorageService?.setLastSync();
+
+        return !hasErrors;
+      } catch (e) {
+        debugPrint('❌ Batch commit failed: $e');
+        return false;
+      }
     } catch (e) {
-      debugPrint('Sync failed: $e');
+      debugPrint('❌ Sync failed: $e');
       return false;
     }
   }
@@ -383,34 +330,40 @@ class SubscriptionService {
     return unsynced.length;
   }
 
-  // Check if we should sync with Firebase (smart sync) - OPTIMIZED for cross-device access
+  // Check if we should sync with Firebase (smart sync) - OPTIMIZED for reduced usage
   Future<bool> shouldSyncWithFirebase() async {
     // Don't sync if offline
     if (!await isOnline()) {
       return false;
     }
 
-    // Always sync if there are unsynced items (critical for cross-device access)
+    // Sync if there are unsynced items (but less frequently)
     if (await getUnsyncedSubscriptionsCount() > 0) {
-      debugPrint('🔄 Unsynced items detected - sync needed for cross-device access');
-      return true;
+      final lastSync = _localStorageService?.getLastSync();
+      if (lastSync == null) {
+        debugPrint('🆕 First sync needed');
+        return true;
+      }
+
+      final timeSinceLastSync = DateTime.now().difference(lastSync);
+      // Sync every 5 minutes instead of immediately
+      if (timeSinceLastSync.inMinutes >= 5) {
+        debugPrint('🔄 Unsynced items and time to sync (${timeSinceLastSync.inMinutes} minutes)');
+        return true;
+      }
     }
 
-    // Check if we haven't synced recently (sync every 15 minutes max - reduced from 30)
+    // Periodic sync every 30 minutes (reduced from 15 for less usage)
     final lastSync = _localStorageService?.getLastSync();
-    if (lastSync == null) {
-      debugPrint('🆕 Never synced before - sync needed');
-      return true;
+    if (lastSync != null) {
+      final timeSinceLastSync = DateTime.now().difference(lastSync);
+      if (timeSinceLastSync.inMinutes >= 30) {
+        debugPrint('⏰ Periodic sync needed (${timeSinceLastSync.inMinutes} minutes)');
+        return true;
+      }
     }
 
-    final timeSinceLastSync = DateTime.now().difference(lastSync);
-    final shouldSync = timeSinceLastSync.inMinutes >= 15; // Reduced to 15 minutes for better cross-device sync
-
-    if (shouldSync) {
-      debugPrint('⏰ Last sync was ${timeSinceLastSync.inMinutes} minutes ago - sync needed');
-    }
-
-    return shouldSync;
+    return false;
   }
 
   // Get sync status
@@ -474,5 +427,31 @@ class SubscriptionService {
   // Clear local data (for logout)
   Future<void> clearLocalData() async {
     await _localStorageService?.clearAll();
+  }
+
+  // Periodic sync method - can be called by app lifecycle events
+  Future<void> performPeriodicSync() async {
+    try {
+      if (await shouldSyncWithFirebase()) {
+        debugPrint('🔄 Performing periodic sync...');
+        await syncLocalToFirebase();
+      }
+    } catch (e) {
+      debugPrint('❌ Periodic sync failed: $e');
+    }
+  }
+
+  // Trigger sync on app resume/focus
+  Future<void> syncOnAppResume() async {
+    try {
+      // Only sync if we've been offline for a while or have pending changes
+      final unsyncedCount = await getUnsyncedSubscriptionsCount();
+      if (unsyncedCount > 0) {
+        debugPrint('🔄 Syncing on app resume ($unsyncedCount pending changes)');
+        await syncLocalToFirebase();
+      }
+    } catch (e) {
+      debugPrint('❌ Resume sync failed: $e');
+    }
   }
 }
