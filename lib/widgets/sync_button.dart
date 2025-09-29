@@ -16,7 +16,34 @@ class SyncButton extends StatelessWidget {
             backgroundColor: Colors.blue,
           ),
         );
-        await syncService.immediateSync();
+
+        try {
+          // Trigger batch sync immediately
+          final syncResult = await syncService.triggerImmediateBatchSync();
+
+          // Show result message
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).hideCurrentSnackBar();
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(syncResult
+                  ? 'Sync completed successfully!'
+                  : 'No pending changes to sync'),
+                backgroundColor: syncResult ? Colors.green : Colors.blue,
+              ),
+            );
+          }
+        } catch (e) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).hideCurrentSnackBar();
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Sync failed: ${e.toString()}'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
       },
       child: const Icon(Icons.sync),
       tooltip: 'Sync Now',

@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'local_storage_service.dart';
 
@@ -12,6 +13,7 @@ class SubscriptionService {
   // Sync state management to prevent duplicates
   bool _isSyncing = false;
   DateTime? _lastSyncTime;
+  Timer? _syncTimer;
 
   // Initialize local storage
   Future<void> init() async {
@@ -29,14 +31,17 @@ class SubscriptionService {
   // Get local storage service for direct access
   LocalStorageService? get localStorageService => _localStorageService;
 
-  // Add a new subscription with LOCAL-FIRST approach
+  // Add a new subscription with BATCHED Firebase sync
   Future<void> addSubscription(Map<String, dynamic> subscription) async {
-    // Save locally first (immediate UI response)
-    await _localStorageService?.saveSubscription(subscription);
-    debugPrint('✅ Saved locally - operation complete for UI');
+    // Mark as pending sync and save locally
+    subscription['syncPending'] = true;
+    subscription['lastModified'] = DateTime.now().toIso8601String();
 
-    // No immediate Firebase sync - will be handled by batch sync
-    debugPrint('📝 Queued for sync - will sync in batch when online');
+    await _localStorageService?.saveSubscription(subscription);
+    debugPrint('✅ Saved locally and marked for sync');
+
+    // Schedule batch sync instead of immediate sync
+    _scheduleBatchSync();
   }
 
   // Get ONLY Firebase subscriptions (clean data source)
@@ -87,17 +92,20 @@ class SubscriptionService {
     }
   }
 
-  // Update a subscription with LOCAL-FIRST approach
+  // Update a subscription with BATCHED Firebase sync
   Future<void> updateSubscription(String id, Map<String, dynamic> subscription) async {
     try {
       debugPrint('📱 Updating subscription locally: $id');
 
-      // Always update locally first
-      await _localStorageService?.updateSubscription(id, subscription);
-      debugPrint('✅ Updated subscription in local storage');
+      // Mark as pending sync and update locally
+      subscription['syncPending'] = true;
+      subscription['lastModified'] = DateTime.now().toIso8601String();
 
-      // No immediate Firebase sync - will be handled by batch sync
-      debugPrint('📝 Update queued for sync');
+      await _localStorageService?.updateSubscription(id, subscription);
+      debugPrint('✅ Updated subscription in local storage and marked for sync');
+
+      // Schedule batch sync instead of immediate sync
+      _scheduleBatchSync();
 
     } catch (e) {
       debugPrint('❌ Failed to update subscription: $e');
@@ -105,21 +113,60 @@ class SubscriptionService {
     }
   }
 
-  // Delete a subscription with LOCAL-FIRST approach
+  // Delete a subscription with BATCHED Firebase sync
   Future<void> deleteSubscription(String id) async {
     try {
       debugPrint('📱 Deleting subscription locally: $id');
 
-      // Delete locally first
+      // Delete locally (which handles marking for sync if needed)
       await _localStorageService?.deleteSubscription(id);
-      debugPrint('✅ Deleted subscription in local storage');
+      debugPrint('✅ Deleted subscription in local storage and marked for sync');
 
-      // No immediate Firebase sync - will be handled by batch sync
-      debugPrint('📝 Deletion queued for sync');
+      // Schedule batch sync instead of immediate sync
+      _scheduleBatchSync();
 
     } catch (e) {
       debugPrint('❌ Failed to delete subscription: $e');
       throw Exception('Failed to delete subscription: $e');
+    }
+  }
+
+  // Schedule batch sync with delay
+  void _scheduleBatchSync() {
+    // Cancel any existing pending sync
+    _syncTimer?.cancel();
+
+    // Schedule sync after a short delay (5 seconds) to batch multiple operations
+    _syncTimer = Timer(const Duration(seconds: 5), () async {
+      debugPrint('⏰ Batch sync triggered by timer');
+      await performBatchSync();
+    });
+
+    debugPrint('⏰ Batch sync scheduled in 5 seconds');
+  }
+
+  // Perform batch sync (called by timer, manual sync, or app events)
+  Future<bool> performBatchSync() async {
+    try {
+      // Prevent multiple syncs running simultaneously
+      if (_isSyncing) {
+        debugPrint('🔄 Sync already in progress, skipping...');
+        return false;
+      }
+
+      // Prevent rapid successive syncs (minimum 30 seconds between syncs)
+      if (_lastSyncTime != null) {
+        final timeSinceLastSync = DateTime.now().difference(_lastSyncTime!);
+        if (timeSinceLastSync.inSeconds < 30) {
+          debugPrint('🔄 Sync cooldown active (${timeSinceLastSync.inSeconds}s ago), skipping...');
+          return true; // Return true because this isn't an error
+        }
+      }
+
+      return await syncLocalToFirebase();
+    } catch (e) {
+      debugPrint('❌ Batch sync scheduling failed: $e');
+      return false;
     }
   }
 
@@ -333,7 +380,7 @@ class SubscriptionService {
         debugPrint('📱 MOBILE DEBUG: Auth connectivity test failed: $e');
       }
 
-      // Try 2: Lightweight Firebase operation
+      // Try 2: More reliable Firebase operation
       try {
         await _firestore.collection('users').limit(1).get().timeout(timeout);
         debugPrint('✅ Firebase connectivity confirmed');
@@ -341,17 +388,18 @@ class SubscriptionService {
       } catch (e) {
         debugPrint('📱 MOBILE DEBUG: Firebase connectivity test failed: $e');
 
-        // MOBILE FRIENDLY: Try alternative connectivity check
+        // Try alternative connectivity check - but be more conservative
         try {
-          // Try a different approach - check if we can reach Firebase auth
+          // Try a simple ping to a reliable endpoint
           final user = _auth.currentUser;
           if (user != null) {
-            // Just check if user exists (no network call)
-            debugPrint('✅ Basic auth check passed - assuming online');
+            // Try to refresh token to confirm actual connectivity
+            await user.getIdToken(true).timeout(const Duration(seconds: 3));
+            debugPrint('✅ Auth connectivity confirmed - actually online');
             return true;
           }
         } catch (authCheckError) {
-          debugPrint('📱 MOBILE DEBUG: Basic auth check failed: $authCheckError');
+          debugPrint('📱 MOBILE DEBUG: Auth connectivity check failed: $authCheckError');
         }
 
         return false;

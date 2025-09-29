@@ -688,8 +688,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       // Show result
       _showSettingFeedback(
-        result['message'],
-        backgroundColor: result['success'] ? Colors.green : Colors.orange,
+        'Cleaned up $result duplicate subscriptions',
+        backgroundColor: result > 0 ? Colors.green : Colors.orange,
       );
     } catch (e) {
       // Hide loading indicator

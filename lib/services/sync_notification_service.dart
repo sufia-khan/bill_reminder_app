@@ -99,6 +99,47 @@ class SyncNotificationService {
     }
   }
 
+  Future<bool> triggerImmediateBatchSync() async {
+    try {
+      if (_subscriptionService == null) {
+        debugPrint('SubscriptionService not available; skipping batch sync');
+        return false;
+      }
+
+      // Check if there are unsynced items
+      final unsyncedCount = await _subscriptionService!.getUnsyncedCount();
+      debugPrint('📱 Found $unsyncedCount unsynced items for immediate batch sync');
+
+      if (unsyncedCount > 0) {
+        // Show sync started notification
+        _showNotification('Syncing $unsyncedCount item${unsyncedCount > 1 ? 's' : ''}...', Colors.blue);
+
+        // Perform batch sync immediately
+        debugPrint('⚡ STARTING BATCH SYNC NOW...');
+        final success = await _subscriptionService!.syncLocalToFirebase();
+        debugPrint('✅ Batch sync completed with success: $success');
+
+        // Show result
+        _showNotification(
+          success
+            ? 'Successfully synced $unsyncedCount item${unsyncedCount > 1 ? 's' : ''}!'
+            : 'Sync failed for $unsyncedCount item${unsyncedCount > 1 ? 's' : ''}',
+          success ? Colors.green : Colors.red
+        );
+
+        return success;
+      } else {
+        debugPrint('✅ No unsynced items found for batch sync');
+        _showNotification('No pending changes to sync', Colors.blue);
+        return false;
+      }
+    } catch (e) {
+      debugPrint('❌ Error during immediate batch sync: $e');
+      _showNotification('Sync failed: ${e.toString()}', Colors.red);
+      return false;
+    }
+  }
+
   void _showNotification(String message, Color color) {
     debugPrint('📢 Showing notification: $message');
     if (_currentContext != null && _currentContext!.mounted) {

@@ -1547,33 +1547,31 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
                   physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.only(top: 6),
                   children: [
-                    // Category Tabs Section
-                    const SizedBox(height: 6),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                    // Category Selection - Horizontal Line with Scrollbar
+                    Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 16),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            'Categories',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.black87,
-                            ),
+                          Row(
+                            children: [
+                              const Text(
+                                'Category',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                  color: Colors.black54,
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(height: 6),
+                          const SizedBox(height: 8),
                           Container(
                             height: 40,
                             child: RawScrollbar(
-                              thumbColor: HSLColor.fromAHSL(
-                                1.0,
-                                236,
-                                0.89,
-                                0.75,
-                              ).toColor(),
-                              radius: const Radius.circular(20),
-                              thickness: 4,
+                              thumbColor: Colors.grey.shade400,
+                              radius: const Radius.circular(10),
+                              thickness: 3,
                               thumbVisibility: true,
                               controller: _categoryScrollController,
                               child: SingleChildScrollView(
@@ -1586,16 +1584,118 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
                         ],
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 16),
 
-                    // Status Tabs Bar
+                    // Status Selection and Summary Row
                     Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 12),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[100],
-                        borderRadius: BorderRadius.circular(12),
+                      margin: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Row(
+                        children: [
+                          // Status Dropdown
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade50,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: Colors.grey.shade300,
+                                width: 1,
+                              ),
+                            ),
+                            child: DropdownButton<String>(
+                              value: selectedStatus,
+                              underline: Container(),
+                              isDense: true,
+                              items: [
+                                const DropdownMenuItem<String>(
+                                  value: 'upcoming',
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.calendar_today, color: Colors.green, size: 18),
+                                      SizedBox(width: 4),
+                                      Text('Upcoming', style: TextStyle(fontSize: 14)),
+                                    ],
+                                  ),
+                                ),
+                                const DropdownMenuItem<String>(
+                                  value: 'overdue',
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.warning, color: Colors.orange, size: 18),
+                                      SizedBox(width: 4),
+                                      Text('Overdue', style: TextStyle(fontSize: 14)),
+                                    ],
+                                  ),
+                                ),
+                                const DropdownMenuItem<String>(
+                                  value: 'paid',
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.check_circle, color: Colors.purple, size: 18),
+                                      SizedBox(width: 4),
+                                      Text('Paid', style: TextStyle(fontSize: 14)),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                              onChanged: (value) {
+                                setState(() {
+                                  selectedStatus = value ?? 'upcoming';
+                                });
+                              },
+                            ),
+                          ),
+
+                          const SizedBox(width: 8),
+
+                          // Bill Count
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade50,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: Colors.grey.shade300,
+                                width: 1,
+                              ),
+                            ),
+                            child: Text(
+                              '${_getFilteredBillCount()} bills',
+                              style: const TextStyle(
+                                color: Colors.black87,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+
+                          const Spacer(),
+
+                          // Total Amount
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade50,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: Colors.grey.shade300,
+                                width: 1,
+                              ),
+                            ),
+                            child: Text(
+                              '\$${_getFilteredTotalAmount().toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                color: Colors.black87,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                      child: Row(children: _buildStatusTabsList()),
                     ),
 
                     const SizedBox(height: 8),
@@ -1617,6 +1717,89 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
     );
   }
 
+  // Helper methods for the new filter design
+  double _getFilteredTotalAmount() {
+    double total = 0.0;
+    final now = DateTime.now();
+
+    for (var bill in _bills) {
+      // Status filtering logic
+      bool matchesStatus = false;
+      final billStatus = bill['status']?.toString() ?? 'upcoming';
+      final dueDate = _parseDueDate(bill);
+
+      switch (selectedStatus) {
+        case 'all':
+          matchesStatus = billStatus != 'paid' && dueDate != null;
+          break;
+        case 'upcoming':
+          matchesStatus = billStatus != 'paid' &&
+                       dueDate != null &&
+                       dueDate.isAfter(now) &&
+                       !dueDate.isBefore(now.subtract(const Duration(days: 1)));
+          break;
+        case 'overdue':
+          matchesStatus = billStatus != 'paid' && dueDate != null && dueDate.isBefore(now);
+          break;
+        case 'paid':
+          matchesStatus = billStatus == 'paid';
+          break;
+      }
+
+      // Category filtering logic
+      final billCategory = bill['category']?.toString();
+      bool matchesCategory = selectedCategory == 'all' ||
+                           (billCategory != null && billCategory == selectedCategory);
+
+      if (matchesStatus && matchesCategory) {
+        final amount = double.tryParse(bill['amount']?.toString() ?? '0') ?? 0.0;
+        total += amount;
+      }
+    }
+
+    return total;
+  }
+
+  int _getFilteredBillCount() {
+    int count = 0;
+    final now = DateTime.now();
+
+    for (var bill in _bills) {
+      bool matchesStatus = false;
+      final billStatus = bill['status']?.toString() ?? 'upcoming';
+      final dueDate = _parseDueDate(bill);
+
+      switch (selectedStatus) {
+        case 'all':
+          matchesStatus = billStatus != 'paid' && dueDate != null;
+          break;
+        case 'upcoming':
+          matchesStatus = billStatus != 'paid' &&
+                       dueDate != null &&
+                       dueDate.isAfter(now) &&
+                       !dueDate.isBefore(now.subtract(const Duration(days: 1)));
+          break;
+        case 'overdue':
+          matchesStatus = billStatus != 'paid' && dueDate != null && dueDate.isBefore(now);
+          break;
+        case 'paid':
+          matchesStatus = billStatus == 'paid';
+          break;
+      }
+
+      final billCategory = bill['category']?.toString();
+      bool matchesCategory = selectedCategory == 'all' ||
+                           (billCategory != null && billCategory == selectedCategory);
+
+      if (matchesStatus && matchesCategory) {
+        count++;
+      }
+    }
+
+    return count;
+  }
+
+  
   // Status Tabs and Content Methods
   List<Widget> _buildStatusTabsList() {
     List<Widget> tabs = [];
@@ -2277,7 +2460,14 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
                       bill['name']?.toString() ?? 'this bill',
                     );
                     if (confirm == true) {
-                      await _markBillAsPaid(index);
+                      // Find the original index of this bill in the _bills list to ensure correctness
+                      final originalIndex = _bills.indexOf(bill);
+                      if (originalIndex != -1) {
+                        await _markBillAsPaid(originalIndex);
+                      } else {
+                        // Fallback to the passed index if bill not found (shouldn't happen)
+                        await _markBillAsPaid(index);
+                      }
                     }
                   },
                   icon: const Icon(Icons.check_circle, size: 20),
@@ -2506,13 +2696,23 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
                   bills[billIndex]['name'] ?? 'this bill',
                 );
                 if (confirm == true) {
-                  await _markBillAsPaid(billIndex);
+                  // Find the original index of this bill in the _bills list
+                  final bill = bills[billIndex];
+                  final originalIndex = _bills.indexOf(bill);
+                  if (originalIndex != -1) {
+                    await _markBillAsPaid(originalIndex);
+                  }
                 }
               },
               onDelete: (billIndex) async {
                 bool? confirm = await _showDeleteConfirmDialog(context);
                 if (confirm == true) {
-                  await _deleteSubscription(billIndex);
+                  // Find the original index of this bill in the _bills list
+                  final bill = bills[billIndex];
+                  final originalIndex = _bills.indexOf(bill);
+                  if (originalIndex != -1) {
+                    await _deleteSubscription(originalIndex);
+                  }
                 }
               },
               onEdit: (billData) async {
@@ -4812,8 +5012,8 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(result['message']),
-            backgroundColor: result['success'] ? Colors.green : Colors.orange,
+            content: Text('Cleanup completed successfully'),
+            backgroundColor: Colors.green,
           ),
         );
 
