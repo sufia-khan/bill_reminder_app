@@ -1,4 +1,4 @@
-// Enhanced modern bill summary card with glassmorphism and improved design
+// bill_summary_card_icon_with_title_fixed_bottom.dart
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:auto_size_text/auto_size_text.dart';
@@ -6,7 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 class BillSummaryCard extends StatelessWidget {
   const BillSummaryCard({
-    super.key,
+    Key? key,
     required this.title,
     required this.icon,
     required this.gradientColors,
@@ -14,32 +14,29 @@ class BillSummaryCard extends StatelessWidget {
     this.secondaryAmount,
     this.secondaryText,
 
-    // Box section heights - reduced for compact layout
-    this.topBoxHeight = 1.5,
-    this.middleBoxHeight = 12,
-    this.bottomBoxHeight = 7,
+    // Box section heights
+    this.topBoxHeight = 2,
+    this.middleBoxHeight = 17,
+    this.bottomBoxHeight = 9,
 
-    // Font sizes - reduced for compact layout
-    this.primaryFontSize = 20,
-    this.minPrimaryFontSize = 9,
-    this.bottomAmountFontSize = 6,
-    this.bottomTextFontSize = 6,
-    this.minBottomFontSize = 5,
+    // Font sizes
+    this.primaryFontSize = 24,
+    this.minPrimaryFontSize = 10,
+    this.bottomAmountFontSize = 7,
+    this.bottomTextFontSize = 7,
+    this.minBottomFontSize = 6,
 
-    // Reduced padding for compact layout
-    this.innerPadding = const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+    this.innerPadding = const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
 
-    // Icon configs - slightly reduced
-    this.iconSize = 16,
+    // Icon configs
+    this.iconSize = 18,
     this.iconOnRight = false,
-    this.textIconGap = 4,
+    this.textIconGap = 6,
 
-    // Reduced bottom height boost
-    this.bottomHeightBoost = 4,
-
-    // Remove card appearance
-    this.removeCardStyle = false,
-  }) : assert(gradientColors.length >= 2);
+    // NEW → extra boost for bottom box only
+    this.bottomHeightBoost = 6,
+  }) : assert(gradientColors.length >= 2),
+       super(key: key);
 
   final String title;
   final IconData icon;
@@ -51,7 +48,6 @@ class BillSummaryCard extends StatelessWidget {
   final double topBoxHeight;
   final double middleBoxHeight;
   final double bottomBoxHeight;
-  final bool removeCardStyle;
 
   final double primaryFontSize;
   final double minPrimaryFontSize;
@@ -69,31 +65,30 @@ class BillSummaryCard extends StatelessWidget {
   // ----------------------
   Widget _topRow() {
     final iconWidget = Container(
-      padding: const EdgeInsets.all(4),
+      padding: const EdgeInsets.all(6),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(8),
+        color: Colors.white.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(10),
       ),
-      child: Icon(icon, color: Colors.white, size: iconSize),
+      child: Icon(icon, color: Colors.white, size: 20.0),
     );
 
     final titleWidget = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(10),
+        color: Colors.white.withOpacity(0.18), // Slightly more opaque for better contrast
+        borderRadius: BorderRadius.circular(14),
       ),
       child: AutoSizeText(
         title,
         textAlign: TextAlign.left,
         style: GoogleFonts.poppins(
           color: Colors.white,
-          fontSize: 11,
+          fontSize: 13,
           fontWeight: FontWeight.w600,
-          letterSpacing: 0.2,
         ),
         maxLines: 1,
-        minFontSize: 9,
+        minFontSize: 10,
         overflow: TextOverflow.ellipsis,
       ),
     );
@@ -111,12 +106,11 @@ class BillSummaryCard extends StatelessWidget {
     final hasAmount = (secondaryAmount?.trim().isNotEmpty ?? false);
     final hasText = (secondaryText?.trim().isNotEmpty ?? false);
 
-    // Always use a Column with consistent spacing to ensure equal height
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (hasAmount)
+    if (hasAmount && hasText) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
           AutoSizeText(
             secondaryAmount!,
             textAlign: TextAlign.left,
@@ -128,23 +122,7 @@ class BillSummaryCard extends StatelessWidget {
             maxLines: 1,
             minFontSize: minBottomFontSize,
             overflow: TextOverflow.ellipsis,
-          )
-        else if (hasText)
-          // When there's only text, we still want it to look like an amount
-          AutoSizeText(
-            secondaryText!,
-            textAlign: TextAlign.left,
-            style: GoogleFonts.poppins(
-              fontSize: bottomAmountFontSize,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-            maxLines: 1,
-            minFontSize: minBottomFontSize,
-            overflow: TextOverflow.ellipsis,
           ),
-
-        if (hasAmount && hasText)
           AutoSizeText(
             secondaryText!,
             textAlign: TextAlign.left,
@@ -156,15 +134,36 @@ class BillSummaryCard extends StatelessWidget {
             maxLines: 1,
             minFontSize: minBottomFontSize,
             overflow: TextOverflow.ellipsis,
-          )
-        // No empty space needed - height consistency is handled in the main calculation
-      ],
+          ),
+        ],
+      );
+    }
+
+    final single = (hasAmount
+        ? secondaryAmount!
+        : (hasText ? secondaryText! : ''));
+    if (single.isEmpty) return const SizedBox.shrink();
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: AutoSizeText(
+        single,
+        textAlign: TextAlign.left,
+        style: GoogleFonts.poppins(
+          fontSize: bottomAmountFontSize,
+          fontWeight: hasAmount ? FontWeight.bold : FontWeight.w600,
+          color: hasAmount ? Colors.white : Colors.white70,
+        ),
+        maxLines: 1,
+        minFontSize: minBottomFontSize,
+        overflow: TextOverflow.ellipsis,
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    const double netScale = 0.75 * 0.75; // ultra-compact scaling
+    const double netScale = 0.85 * 0.85; // compact scaling
 
     final double topH = topBoxHeight * netScale;
     final double midH = middleBoxHeight * netScale;
@@ -178,7 +177,7 @@ class BillSummaryCard extends StatelessWidget {
     );
 
     final double perSidePad = math.max(
-      8.0,
+      12.0,
       math.max(
         math.max(scaledInnerPadding.left, scaledInnerPadding.top),
         math.max(scaledInnerPadding.right, scaledInnerPadding.bottom),
@@ -189,16 +188,16 @@ class BillSummaryCard extends StatelessWidget {
     final bool hasAmount = (secondaryAmount?.trim().isNotEmpty ?? false);
     final bool hasText = (secondaryText?.trim().isNotEmpty ?? false);
 
-    const double lineHeightFactor = 1.15;
-    const double bottomSpacing = 2.0;
+    const double lineHeightFactor = 1.25;
     double requiredBottomH;
     if (hasAmount && hasText) {
       requiredBottomH =
-          (bottomAmountFontSize + bottomTextFontSize) * lineHeightFactor + bottomSpacing;
+          (bottomAmountFontSize + bottomTextFontSize) * lineHeightFactor + 2.0;
     } else if (hasAmount || hasText) {
-      // For single-line content, calculate height as if there were two lines
-      // This ensures consistent height regardless of content
-      requiredBottomH = (bottomAmountFontSize + bottomTextFontSize) * lineHeightFactor + bottomSpacing;
+      final double used = (hasAmount
+          ? bottomAmountFontSize
+          : bottomTextFontSize);
+      requiredBottomH = used * lineHeightFactor + 2.0;
     } else {
       requiredBottomH = 0.0;
     }
@@ -208,7 +207,7 @@ class BillSummaryCard extends StatelessWidget {
     // 🔹 add boost only to bottom box
     bottomH += bottomHeightBoost;
 
-    const double safeBuffer = 2.0;
+    const double safeBuffer = 3.0;
     final double totalHeight =
         topH +
         midH +
@@ -235,7 +234,8 @@ class BillSummaryCard extends StatelessWidget {
                 style: GoogleFonts.poppins(
                   color: Colors.white,
                   fontSize: primaryFontSize,
-                  fontWeight: FontWeight.bold,
+                  fontWeight: FontWeight.w700, // Slightly bolder for modern look
+                  letterSpacing: -0.5, // Slight letter spacing for premium feel
                 ),
                 maxLines: 1,
                 minFontSize: minPrimaryFontSize,
@@ -250,7 +250,7 @@ class BillSummaryCard extends StatelessWidget {
                 return Align(
                   alignment: Alignment.centerLeft,
                   child: Padding(
-                    padding: const EdgeInsets.only(right: 2.0),
+                    padding: const EdgeInsets.only(right: 4.0),
                     child: _buildBottom(constraints.maxWidth),
                   ),
                 );
@@ -261,29 +261,43 @@ class BillSummaryCard extends StatelessWidget {
       ),
     );
 
-    return Container(
-      height: totalHeight,
-      padding: finalInnerPadding,
-      decoration: removeCardStyle
-          ? null
-          : BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: gradientColors,
-              ),
-              borderRadius: BorderRadius.circular(10),
-              boxShadow: [
-                BoxShadow(
-                  color: gradientColors.first.withValues(alpha: 0.10),
-                  blurRadius: 8,
-                  offset: const Offset(0, 4),
-                ),
-              ],
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () {}, // Placeholder for future interaction
+        splashFactory: InkRipple.splashFactory,
+        splashColor: Colors.white.withOpacity(0.1),
+        highlightColor: Colors.white.withOpacity(0.05),
+        child: Container(
+          height: totalHeight,
+          padding: finalInnerPadding,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: gradientColors,
             ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [textColumn],
+            borderRadius: BorderRadius.circular(16), // Slightly more rounded for modern look
+            boxShadow: [
+              BoxShadow(
+                color: gradientColors.first.withOpacity(0.15), // Increased opacity for better shadow
+                blurRadius: 12, // Increased blur for softer shadow
+                offset: const Offset(0, 6), // Slightly increased offset
+              ),
+              BoxShadow(
+                color: gradientColors.first.withOpacity(0.05), // Additional subtle shadow
+                blurRadius: 20,
+                offset: const Offset(0, 2),
+                spreadRadius: -2,
+              ),
+            ],
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [textColumn],
+          ),
+        ),
       ),
     );
   }

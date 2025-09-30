@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:ui' as ui;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -7,7 +8,7 @@ import 'package:projeckt_k/services/local_storage_service.dart';
 import 'package:projeckt_k/services/subscription_service.dart';
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({Key? key}) : super(key: key);
+  const SettingsScreen({super.key});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -30,12 +31,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final notificationService = NotificationService();
     final defaultTime = await notificationService.getDefaultNotificationTime();
 
-    setState(() {
-      _notificationsEnabled = prefs.getBool('notifications_enabled') ?? true;
-      _darkMode = prefs.getBool('dark_mode') ?? false;
-      _currency = prefs.getString('currency') ?? 'USD';
-      _reminderTime = '${defaultTime.hour.toString().padLeft(2, '0')}:${defaultTime.minute.toString().padLeft(2, '0')}';
-    });
+    if (mounted) {
+      setState(() {
+        _notificationsEnabled = prefs.getBool('notifications_enabled') ?? true;
+        _darkMode = prefs.getBool('dark_mode') ?? false;
+        _currency = prefs.getString('currency') ?? 'USD';
+        _reminderTime = '${defaultTime.hour.toString().padLeft(2, '0')}:${defaultTime.minute.toString().padLeft(2, '0')}';
+      });
+    }
   }
 
   Future<void> _savePreference(String key, dynamic value) async {
@@ -44,6 +47,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await prefs.setBool(key, value);
     } else if (value is String) {
       await prefs.setString(key, value);
+    }
+  }
+
+  void _showSettingFeedback(String message, {Color backgroundColor = Colors.green}) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: backgroundColor,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+      );
     }
   }
 
@@ -72,8 +90,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  // Header method removed - now using AppBar instead
-
   Widget _buildSettingsSections() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -85,11 +101,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
               'Enable dark theme',
               _darkMode,
               (value) {
-                setState(() {
-                  _darkMode = value;
-                });
-                _savePreference('dark_mode', value);
-                _showSettingFeedback('Dark mode ${value ? 'enabled' : 'disabled'}');
+                if (mounted) {
+                  setState(() {
+                    _darkMode = value;
+                  });
+                  _savePreference('dark_mode', value);
+                  _showSettingFeedback('Dark mode ${value ? 'enabled' : 'disabled'}');
+                }
               },
               Icons.dark_mode_outlined,
               Colors.purple,
@@ -99,18 +117,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
               'Enable bill reminders',
               _notificationsEnabled,
               (value) async {
-                setState(() {
-                  _notificationsEnabled = value;
-                });
-                _savePreference('notifications_enabled', value);
+                if (mounted) {
+                  setState(() {
+                    _notificationsEnabled = value;
+                  });
+                  _savePreference('notifications_enabled', value);
 
-                // If notifications are disabled, cancel all existing notifications
-                if (!value) {
-                  final notificationService = NotificationService();
-                  await notificationService.cancelAllNotifications();
+                  // If notifications are disabled, cancel all existing notifications
+                  if (!value) {
+                    final notificationService = NotificationService();
+                    await notificationService.cancelAllNotifications();
+                  }
+
+                  _showSettingFeedback('Notifications ${value ? 'enabled' : 'disabled'}');
                 }
-
-                _showSettingFeedback('Notifications ${value ? 'enabled' : 'disabled'}');
               },
               Icons.notifications_outlined,
               Colors.blue,
@@ -173,15 +193,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ]),
           const SizedBox(height: 24),
           _buildSection('App Settings', [
+            _buildListTile(
+              'Network Connection',
+              'Check network status',
+              Icons.wifi,
+              Colors.blue,
+              () => _checkNetworkConnection(),
+            ),
             _buildSwitchTile(
               'Auto-categorize Bills',
               'Automatically categorize new bills',
               true,
               (value) {
-                setState(() {
-                  // Auto-categorize setting would be implemented
-                });
-                _showSettingFeedback('Auto-categorization ${value ? 'enabled' : 'disabled'}');
+                if (mounted) {
+                  setState(() {
+                    // Auto-categorize setting would be implemented
+                  });
+                  _showSettingFeedback('Auto-categorization ${value ? 'enabled' : 'disabled'}');
+                }
               },
               Icons.category_outlined,
               Colors.indigo,
@@ -198,10 +227,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
               'Get reminders before bills are due',
               true,
               (value) {
-                setState(() {
-                  // Smart reminders setting would be implemented
-                });
-                _showSettingFeedback('Smart reminders ${value ? 'enabled' : 'disabled'}');
+                if (mounted) {
+                  setState(() {
+                    // Smart reminders setting would be implemented
+                  });
+                  _showSettingFeedback('Smart reminders ${value ? 'enabled' : 'disabled'}');
+                }
               },
               Icons.lightbulb_outlined,
               Colors.yellow,
@@ -236,7 +267,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
+            color: Colors.black.withValues(alpha: 0.1),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -281,7 +312,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         leading: Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: iconColor.withOpacity(0.1),
+            color: iconColor.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(
@@ -307,7 +338,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         trailing: Switch(
           value: value,
           onChanged: onChanged,
-          activeColor: HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor(),
+          activeThumbColor: HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor(),
         ),
       ),
     );
@@ -330,7 +361,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         leading: Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: iconColor.withOpacity(0.1),
+            color: iconColor.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(
@@ -384,12 +415,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ? Icon(Icons.check, color: Colors.blue.shade600)
                     : null,
                 onTap: () {
-                  setState(() {
-                    _currency = currency;
-                  });
-                  _savePreference('currency', currency);
-                  Navigator.pop(context);
-                  _showSettingFeedback('Currency changed to $currency');
+                  if (mounted) {
+                    setState(() {
+                      _currency = currency;
+                    });
+                    _savePreference('currency', currency);
+                    Navigator.pop(context);
+                    _showSettingFeedback('Currency changed to $currency');
+                  }
                 },
               );
             }),
@@ -407,7 +440,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         minute: int.parse(_reminderTime.split(':')[1]),
       ),
     ).then((time) async {
-      if (time != null) {
+      if (time != null && mounted) {
         final newTime = '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
         setState(() {
           _reminderTime = newTime;
@@ -467,18 +500,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _clearAllData() async {
     try {
-      // Show loading indicator
+      // Show loading indicator with blur background
       showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (context) => const AlertDialog(
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 16),
-              Text('Clearing all data...'),
-            ],
+        barrierColor: Colors.black.withValues(alpha: 0.3),
+        builder: (context) => BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+          child: AlertDialog(
+            backgroundColor: Colors.white.withValues(alpha: 0.9),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Clearing all data...',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       );
@@ -495,53 +542,84 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
         try {
-          // Delete all subscriptions from Firestore
+          // Delete all subscriptions from Firestore with batch write for better performance
           final subscriptionsRef = FirebaseFirestore.instance
               .collection('users')
               .doc(user.uid)
               .collection('subscriptions');
 
           final snapshot = await subscriptionsRef.get();
+
+          // Use batch write for better performance
+          final batch = FirebaseFirestore.instance.batch();
           for (final doc in snapshot.docs) {
-            await doc.reference.delete();
+            batch.delete(doc.reference);
           }
+          await batch.commit();
+
+          // Also clear any user-specific settings from Firestore
+          final userSettingsRef = FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid);
+          await userSettingsRef.delete();
+
         } catch (e) {
           debugPrint('Error clearing Firebase data: $e');
         }
       }
 
+      // Clear any cached data in local storage service
+      final localStorageService = await LocalStorageService.init();
+      await localStorageService.clearAll();
+
       // Hide loading indicator
-      Navigator.pop(context);
+      if (mounted && Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
 
       // Show success message
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('All data cleared successfully'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('All data cleared successfully'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.all(Radius.circular(8)),
+            ),
+          ),
+        );
+      }
 
       // Reset app state
-      setState(() {
-        _notificationsEnabled = true;
-        _darkMode = false;
-        _currency = 'USD';
-        _reminderTime = '09:00';
-      });
+      if (mounted) {
+        setState(() {
+          _notificationsEnabled = true;
+          _darkMode = false;
+          _currency = 'USD';
+          _reminderTime = '09:00';
+        });
+      }
 
     } catch (e) {
       // Hide loading indicator if showing
-      if (Navigator.canPop(context)) {
+      if (mounted && Navigator.canPop(context)) {
         Navigator.pop(context);
       }
 
       // Show error message
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error clearing data: ${e.toString()}'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error clearing data: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.all(Radius.circular(8)),
+            ),
+          ),
+        );
+      }
     }
   }
 
@@ -570,25 +648,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ? Icon(Icons.check, color: Colors.blue.shade600)
                     : null,
                 onTap: () {
-                  Navigator.pop(context);
-                  _showSettingFeedback('Default category set to $category');
+                  if (mounted) {
+                    Navigator.pop(context);
+                    _showSettingFeedback('Default category set to $category');
+                  }
                 },
               );
             }),
           ],
-        ),
-      ),
-    );
-  }
-
-  void _showSettingFeedback(String message, {Color backgroundColor = Colors.green}) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: backgroundColor,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
         ),
       ),
     );
@@ -633,6 +700,143 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Future<void> _checkNetworkConnection() async {
+    try {
+      // Show checking dialog
+      if (mounted) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => const AlertDialog(
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text('Checking network connection...'),
+              ],
+            ),
+          ),
+        );
+      }
+
+      // Check network connectivity
+      final subscriptionService = SubscriptionService();
+      final isOnline = await subscriptionService.isOnline();
+
+      // Hide checking dialog
+      if (mounted && Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+
+      // Show result with detailed information
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Row(
+              children: [
+                Icon(
+                  isOnline ? Icons.wifi : Icons.wifi_off,
+                  color: isOnline ? Colors.green : Colors.red,
+                ),
+                const SizedBox(width: 8),
+                Text('Network Status'),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Status: ${isOnline ? 'Connected' : 'Disconnected'}',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: isOnline ? Colors.green : Colors.red,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  isOnline
+                    ? 'Your device is connected to the internet. You can sync your bills with the cloud.'
+                    : 'Your device is not connected to the internet. Bills will be saved locally and synced when you\'re back online.',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey[700],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: isOnline ? Colors.green.withValues(alpha: 0.1) : Colors.red.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: isOnline ? Colors.green.withValues(alpha: 0.3) : Colors.red.withValues(alpha: 0.3),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        isOnline ? Icons.check_circle : Icons.error,
+                        color: isOnline ? Colors.green : Colors.red,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          isOnline ? 'Cloud sync is available' : 'Only local storage available',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w500,
+                            color: isOnline ? Colors.green[700] : Colors.red[700],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+              if (!isOnline)
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _openNetworkSettings();
+                  },
+                  child: const Text('Open Settings'),
+                ),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      // Hide checking dialog if showing
+      if (mounted && Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+
+      if (mounted) {
+        _showSettingFeedback(
+          'Failed to check network connection: ${e.toString()}',
+          backgroundColor: Colors.red,
+        );
+      }
+    }
+  }
+
+  void _openNetworkSettings() {
+    // This would open device network settings
+    // For now, show a message directing user to device settings
+    _showSettingFeedback(
+      'Please check your network connection in device settings',
+      backgroundColor: Colors.orange,
+    );
+  }
+
   Future<void> _cleanupDuplicates() async {
     // Check internet connection
     final user = FirebaseAuth.instance.currentUser;
@@ -664,10 +868,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (confirmed != true) return;
 
     // Show loading indicator
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const AlertDialog(
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const AlertDialog(
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -677,28 +882,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
         ),
       ),
-    );
+      );
+    }
 
     try {
       final subscriptionService = SubscriptionService();
       final result = await subscriptionService.cleanupDuplicateSubscriptions();
 
       // Hide loading indicator
-      Navigator.pop(context);
+      if (mounted && Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
 
       // Show result
-      _showSettingFeedback(
-        'Cleaned up $result duplicate subscriptions',
-        backgroundColor: result > 0 ? Colors.green : Colors.orange,
-      );
+      if (mounted) {
+        _showSettingFeedback(
+          'Cleaned up $result duplicate subscriptions',
+          backgroundColor: result > 0 ? Colors.green : Colors.orange,
+        );
+      }
     } catch (e) {
       // Hide loading indicator
-      Navigator.pop(context);
+      if (mounted && Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
 
-      _showSettingFeedback(
-        'Failed to clean up duplicates: ${e.toString()}',
-        backgroundColor: Colors.red,
-      );
+      if (mounted) {
+        _showSettingFeedback(
+          'Failed to clean up duplicates: ${e.toString()}',
+          backgroundColor: Colors.red,
+        );
+      }
     }
   }
 }

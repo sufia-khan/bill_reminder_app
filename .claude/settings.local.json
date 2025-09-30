@@ -8,7 +8,14 @@
       "Bash(flutter run:*)",
       "Bash(flutter:*)",
       "Bash(git add:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(git commit:*)",
+      "Bash(dir:*)",
+      "Bash(gradlew:*)",
+      "Bash(\"./gradlew.bat\" --stop)",
+      "Bash(taskkill:*)",
+      "Bash(cmd:*)",
+      "Bash(\"./gradlew.bat\" clean)"
     ],
     "deny": [],
     "ask": []

@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:projeckt_k/services/auth_service.dart';
 import 'package:projeckt_k/screens/login_screen.dart';
 import 'package:projeckt_k/widgets/main_navigation_wrapper.dart';
@@ -32,31 +34,145 @@ class MyApp extends StatelessWidget {
       title: 'SubManager',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.blue,
+          seedColor: HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor(), // Lighter purple HSL(236, 89%, 65%)
           brightness: Brightness.light,
         ),
         useMaterial3: true,
-        appBarTheme: const AppBarTheme(centerTitle: true, elevation: 0),
+        scaffoldBackgroundColor: Colors.white,
+        appBarTheme: const AppBarTheme(
+          centerTitle: true,
+          elevation: 0,
+          surfaceTintColor: Colors.transparent,
+          backgroundColor: Colors.white,
+          systemOverlayStyle: SystemUiOverlayStyle(
+            statusBarColor: Colors.white,
+            statusBarIconBrightness: Brightness.dark,
+            statusBarBrightness: Brightness.light,
+          ),
+        ),
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
-            elevation: 4,
-            padding: const EdgeInsets.symmetric(vertical: 16),
+            elevation: 0,
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
             ),
+            shadowColor: Colors.transparent,
+          ),
+        ),
+        outlinedButtonTheme: OutlinedButtonThemeData(
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            side: const BorderSide(color: Color(0xFFE5E7EB), width: 1.5),
           ),
         ),
         inputDecorationTheme: InputDecorationTheme(
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFF2563EB), width: 2),
+          ),
           filled: true,
-          fillColor: Colors.blue[50],
+          fillColor: const Color(0xFFF9FAFB),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         ),
         cardTheme: CardThemeData(
-          elevation: 8,
+          elevation: 0,
           color: Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
+          shadowColor: const Color(0x0F000000),
+        ),
+        textTheme: GoogleFonts.poppinsTextTheme(ThemeData.light().textTheme).copyWith(
+          headlineLarge: GoogleFonts.poppins(
+            fontSize: 32,
+            fontWeight: FontWeight.bold,
+            color: const Color(0xFF111827),
+          ),
+          headlineMedium: GoogleFonts.poppins(
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+            color: const Color(0xFF111827),
+          ),
+          headlineSmall: GoogleFonts.poppins(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            color: const Color(0xFF111827),
+          ),
+          titleLarge: GoogleFonts.poppins(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: const Color(0xFF111827),
+          ),
+          titleMedium: GoogleFonts.poppins(
+            fontSize: 16,
+            fontWeight: FontWeight.w500,
+            color: const Color(0xFF111827),
+          ),
+          titleSmall: GoogleFonts.poppins(
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+            color: const Color(0xFF111827),
+          ),
+          bodyLarge: GoogleFonts.poppins(
+            fontSize: 16,
+            fontWeight: FontWeight.normal,
+            color: const Color(0xFF374151),
+          ),
+          bodyMedium: GoogleFonts.poppins(
+            fontSize: 14,
+            fontWeight: FontWeight.normal,
+            color: const Color(0xFF6B7280),
+          ),
+          bodySmall: GoogleFonts.poppins(
+            fontSize: 12,
+            fontWeight: FontWeight.normal,
+            color: const Color(0xFF6B7280),
+          ),
+        ),
+        dividerTheme: const DividerThemeData(
+          color: Color(0xFFF3F4F6),
+          thickness: 1,
+          space: 1,
+        ),
+        chipTheme: ChipThemeData(
+          backgroundColor: const Color(0xFFF3F4F6),
+          selectedColor: const Color(0xFF2563EB),
+          secondarySelectedColor: Colors.white,
+          deleteIconColor: const Color(0xFF6B7280),
+          disabledColor: const Color(0xFFE5E7EB),
+          selectedShadowColor: Colors.transparent,
+          checkmarkColor: Colors.white,
+          labelStyle: GoogleFonts.poppins(
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+            color: const Color(0xFF374151),
+          ),
+          secondaryLabelStyle: GoogleFonts.poppins(
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+            color: const Color(0xFF374151),
+          ),
+          brightness: Brightness.light,
+          elevation: 0,
+          pressElevation: 0,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          labelPadding: const EdgeInsets.symmetric(horizontal: 8),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+          side: BorderSide.none,
         ),
       ),
       darkTheme: ThemeData(

@@ -13,6 +13,9 @@ class NotificationService {
   // Callback for handling mark as paid action
   Function(String? billId)? onMarkAsPaid;
 
+  // Callback for handling undo action
+  Function(String? billId)? onUndoPayment;
+
   static const String _defaultNotificationTimeKey = 'default_notification_time';
   static const TimeOfDay _defaultTime = TimeOfDay(hour: 9, minute: 0);
 
@@ -145,6 +148,16 @@ class NotificationService {
       await androidPlugin.createNotificationChannel(channel);
       debugPrint('✅ Created Android notification channel: ${channel.id}');
     }
+
+    // Set up iOS notification categories for action buttons
+    await _setupIOSNotificationCategories();
+  }
+
+  // Set up iOS notification categories for action buttons
+  Future<void> _setupIOSNotificationCategories() async {
+    // Note: iOS notification categories need to be set up in the native iOS code
+    // This is a placeholder for future iOS implementation
+    debugPrint('ℹ️ iOS notification categories setup placeholder');
   }
 
   // Request notification permissions
@@ -172,14 +185,56 @@ class NotificationService {
       debugPrint('📝 Mark as Paid action triggered');
       _handleMarkAsPaid(notificationResponse.payload);
     }
+
+    // Handle undo action
+    if (notificationResponse.actionId == 'undo_payment') {
+      debugPrint('↩️ Undo Payment action triggered');
+      _handleUndoPayment(notificationResponse.payload);
+    }
   }
 
-  // Handle mark as paid action
-  static void _handleMarkAsPaid(String? payload) {
+  // Handle mark as paid action using shared preferences for persistence
+  static void _handleMarkAsPaid(String? payload) async {
     debugPrint('📝 Handling mark as paid for payload: $payload');
 
-    // Call the callback if it's set
-    _instance.onMarkAsPaid?.call(payload);
+    if (payload != null) {
+      // Store the action in shared preferences for processing when app resumes
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('pending_notification_action', 'mark_paid');
+      await prefs.setString('pending_bill_id', payload);
+      await prefs.setInt('pending_action_time', DateTime.now().millisecondsSinceEpoch);
+
+      debugPrint('📝 Stored mark as paid action in preferences');
+
+      // Try to call the callback if available
+      try {
+        _instance.onMarkAsPaid?.call(payload);
+      } catch (e) {
+        debugPrint('⚠️ Could not call mark as paid callback: $e');
+      }
+    }
+  }
+
+  // Handle undo payment action using shared preferences for persistence
+  static void _handleUndoPayment(String? payload) async {
+    debugPrint('↩️ Handling undo payment for payload: $payload');
+
+    if (payload != null) {
+      // Store the action in shared preferences for processing when app resumes
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('pending_notification_action', 'undo_payment');
+      await prefs.setString('pending_bill_id', payload);
+      await prefs.setInt('pending_action_time', DateTime.now().millisecondsSinceEpoch);
+
+      debugPrint('↩️ Stored undo payment action in preferences');
+
+      // Try to call the callback if available
+      try {
+        _instance.onUndoPayment?.call(payload);
+      } catch (e) {
+        debugPrint('⚠️ Could not call undo payment callback: $e');
+      }
+    }
   }
 
   // Get default notification time
@@ -276,6 +331,7 @@ class NotificationService {
             'mark_paid',
             'Mark as Paid',
             icon: DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
+            showsUserInterface: false,
           ),
         ],
       );
@@ -285,6 +341,7 @@ class NotificationService {
         presentAlert: true,
         presentBadge: true,
         presentSound: true,
+        categoryIdentifier: 'BILL_REMINDER_CATEGORY',
       );
 
       // Combined notification details
@@ -332,6 +389,7 @@ class NotificationService {
             'mark_paid',
             'Mark as Paid',
             icon: DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
+            showsUserInterface: false,
           ),
         ],
       );
@@ -341,6 +399,7 @@ class NotificationService {
         presentAlert: true,
         presentBadge: true,
         presentSound: true,
+        categoryIdentifier: 'BILL_REMINDER_CATEGORY',
       );
 
       // Combined notification details
@@ -444,6 +503,129 @@ class NotificationService {
     debugPrint('Cancelled all notifications');
   }
 
+  // Update notification to show payment confirmation with undo option
+  Future<void> updatePaymentConfirmationNotification({
+    required int id,
+    required String billName,
+    required String? payload,
+  }) async {
+    try {
+      debugPrint('🔄 Updating notification to payment confirmation for: $billName');
+
+      const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+        'bill_reminders',
+        'Bill Reminders',
+        channelDescription: 'Notifications for bill due dates',
+        importance: Importance.high,
+        priority: Priority.high,
+        icon: '@mipmap/ic_launcher',
+        largeIcon: DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
+        actions: [
+          AndroidNotificationAction(
+            'undo_payment',
+            'Undo',
+            icon: DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
+            showsUserInterface: false,
+          ),
+        ],
+      );
+
+      const DarwinNotificationDetails iOSDetails = DarwinNotificationDetails(
+        presentAlert: true,
+        presentBadge: true,
+        presentSound: true,
+      );
+
+      const NotificationDetails notificationDetails = NotificationDetails(
+        android: androidDetails,
+        iOS: iOSDetails,
+      );
+
+      await flutterLocalNotificationsPlugin.show(
+        id,
+        '✅ Bill marked as paid',
+        '$billName – Tap Undo if this was a mistake',
+        notificationDetails,
+        payload: payload ?? 'payment_confirmed_$id',
+      );
+
+      debugPrint('✅ Successfully updated payment confirmation notification for bill $id');
+    } catch (e) {
+      debugPrint('❌ ERROR updating payment confirmation notification: $e');
+    }
+  }
+
+  // Check if app is in foreground
+  Future<bool> isAppInForeground() async {
+    try {
+      // This is a simple check - in a real implementation you might want to use
+      // a more sophisticated method like maintaining app state
+      return WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+    } catch (e) {
+      debugPrint('Error checking app foreground state: $e');
+      return false;
+    }
+  }
+
+  // Check and process any pending notification actions
+  Future<void> checkAndProcessPendingActions() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final pendingAction = prefs.getString('pending_notification_action');
+      final billId = prefs.getString('pending_bill_id');
+      final actionTime = prefs.getInt('pending_action_time');
+
+      debugPrint('🔍 Checking for pending notification actions...');
+      debugPrint('   Action: $pendingAction');
+      debugPrint('   Bill ID: $billId');
+      debugPrint('   Action Time: $actionTime');
+
+      if (pendingAction != null && billId != null && actionTime != null) {
+        // Check if the action is recent (within last 5 minutes)
+        final now = DateTime.now().millisecondsSinceEpoch;
+        final timeDiff = now - actionTime;
+        final timeDiffMinutes = timeDiff / 60000; // Convert to minutes
+
+        debugPrint('⏱️ Action time difference: ${timeDiffMinutes.toStringAsFixed(2)} minutes');
+
+        if (timeDiff < 300000) { // 5 minutes in milliseconds
+          debugPrint('📝 Processing pending notification action: $pendingAction for bill: $billId');
+
+          // Check if callbacks are set
+          if (pendingAction == 'mark_paid' && _instance.onMarkAsPaid == null) {
+            debugPrint('⚠️ Mark as paid callback is not set');
+          } else if (pendingAction == 'undo_payment' && _instance.onUndoPayment == null) {
+            debugPrint('⚠️ Undo payment callback is not set');
+          }
+
+          // Process the action
+          if (pendingAction == 'mark_paid') {
+            _instance.onMarkAsPaid?.call(billId);
+          } else if (pendingAction == 'undo_payment') {
+            _instance.onUndoPayment?.call(billId);
+          }
+
+          // Clear the pending action
+          await prefs.remove('pending_notification_action');
+          await prefs.remove('pending_bill_id');
+          await prefs.remove('pending_action_time');
+
+          debugPrint('✅ Processed and cleared pending notification action');
+        } else {
+          debugPrint('⏰ Pending notification action expired ($timeDiffMinutes minutes), clearing');
+          // Clear expired actions
+          await prefs.remove('pending_notification_action');
+          await prefs.remove('pending_bill_id');
+          await prefs.remove('pending_action_time');
+        }
+      } else {
+        debugPrint('📭 No pending notification actions found');
+      }
+    } catch (e) {
+      debugPrint('❌ Error processing pending notification actions: $e');
+    }
+  }
+
   // Show an immediate notification (for testing)
   Future<void> showImmediateNotification({
     required String title,
@@ -519,6 +701,44 @@ class NotificationService {
     }
   }
 
+  // Test method to simulate notification action (for debugging)
+  static void testNotificationAction(String actionId, String? payload) {
+    debugPrint('🧪 Testing notification action: $actionId with payload: $payload');
+
+    if (actionId == 'mark_paid') {
+      _handleMarkAsPaid(payload);
+    } else if (actionId == 'undo_payment') {
+      _handleUndoPayment(payload);
+    }
+  }
+
+  // Verify notification action setup
+  Future<void> verifyNotificationSetup() async {
+    debugPrint('🔍 Verifying notification action setup...');
+
+    // Check if callbacks are set
+    if (_instance.onMarkAsPaid == null) {
+      debugPrint('⚠️ Warning: onMarkAsPaid callback is not set');
+    } else {
+      debugPrint('✅ onMarkAsPaid callback is properly set');
+    }
+
+    if (_instance.onUndoPayment == null) {
+      debugPrint('⚠️ Warning: onUndoPayment callback is not set');
+    } else {
+      debugPrint('✅ onUndoPayment callback is properly set');
+    }
+
+    // Check if notifications are enabled
+    final isEnabled = await areNotificationsEnabled();
+    debugPrint('📱 Notifications enabled: $isEnabled');
+
+    // Test action handling
+    debugPrint('🧪 Testing action handling...');
+    testNotificationAction('mark_paid', 'test_bill_id');
+    testNotificationAction('undo_payment', 'test_bill_id');
+  }
+
   // Open notification settings
   Future<void> openNotificationSettings() async {
     // Note: The openNotificationSettings method may not be available in all versions
@@ -580,6 +800,7 @@ class NotificationService {
             'mark_paid',
             'Mark as Paid',
             icon: DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
+            showsUserInterface: false,
           ),
         ],
       );
@@ -589,6 +810,7 @@ class NotificationService {
         presentAlert: true,
         presentBadge: true,
         presentSound: true,
+        categoryIdentifier: 'BILL_REMINDER_CATEGORY',
       );
 
       // Combined notification details

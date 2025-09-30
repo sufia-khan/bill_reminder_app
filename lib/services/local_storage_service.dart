@@ -101,6 +101,15 @@ class LocalStorageService {
     await _prefs.setString(subscriptionsKey, subscriptionsJson);
   }
 
+  // Public method to save subscriptions (used for fallback updates)
+  Future<void> saveSubscriptions(List<Map<String, dynamic>> subscriptions) async {
+    final userId = _getCurrentUserId();
+    if (userId == null) {
+      throw Exception('User not logged in - cannot save subscriptions');
+    }
+    await _saveSubscriptions(subscriptions, userId);
+  }
+
   // Clear local subscriptions for current user (after successful sync)
   Future<void> clearLocalSubscriptions() async {
     final userId = _getCurrentUserId();
@@ -240,6 +249,49 @@ class LocalStorageService {
     await _prefs.remove('last_sync'); // Old mixed key
 
     debugPrint('✅ Cleaned up mixed user data');
+  }
+
+  // Get oldest unsynced item time for smart batching
+  Future<DateTime?> getOldestUnsyncedTime() async {
+    final userId = _getCurrentUserId();
+    if (userId == null) return null;
+
+    final unsynced = await getUnsyncedSubscriptions();
+    if (unsynced.isEmpty) return null;
+
+    DateTime? oldest;
+    for (final item in unsynced) {
+      final modifiedStr = item['lastModified'] as String?;
+      if (modifiedStr != null) {
+        final modified = DateTime.tryParse(modifiedStr);
+        if (modified != null && (oldest == null || modified.isBefore(oldest))) {
+          oldest = modified;
+        }
+      }
+    }
+
+    return oldest;
+  }
+
+  // Get last Firestore refresh time for smart caching
+  Future<DateTime?> getLastFirestoreRefresh() async {
+    final userId = _getCurrentUserId();
+    if (userId == null) return null;
+
+    final key = 'last_firestore_refresh_$userId';
+    final refreshStr = _prefs.getString(key);
+    if (refreshStr == null) return null;
+
+    return DateTime.tryParse(refreshStr);
+  }
+
+  // Set last Firestore refresh time
+  Future<void> setLastFirestoreRefresh() async {
+    final userId = _getCurrentUserId();
+    if (userId == null) return;
+
+    final key = 'last_firestore_refresh_$userId';
+    await _prefs.setString(key, DateTime.now().toIso8601String());
   }
 
   // Factory constructor for initialization

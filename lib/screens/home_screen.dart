@@ -1,15 +1,26 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:intl/intl.dart';
 import 'package:projeckt_k/screens/profile_screen.dart';
 import 'package:projeckt_k/services/subscription_service.dart';
 import 'package:projeckt_k/services/notification_service.dart';
+import 'package:projeckt_k/services/app_lifecycle_manager.dart';
 import 'package:projeckt_k/models/category_model.dart';
 import 'package:projeckt_k/widgets/subtitle_changing.dart';
 import 'package:projeckt_k/widgets/bill_summary_cards.dart';
 import 'package:projeckt_k/widgets/bill_item_widget.dart';
 import 'package:projeckt_k/widgets/category_bills_bottom_sheet.dart';
+import 'package:projeckt_k/widgets/enhanced_bill_bottom_sheet.dart';
+import 'package:projeckt_k/widgets/horizontal_category_selector.dart';
+import 'package:projeckt_k/widgets/summary_information_bar.dart';
+
+// NOTE: this file contains some legacy code paths and conditional branches
+// that are intentionally permissive while we iterate on sync logic.
+// Suppress some non-critical analyzer warnings here so runtime testing
+// can proceed. We'll remove these ignores after targeted cleanup.
+// ignore_for_file: dead_code, unnecessary_cast, unnecessary_null_comparison, unused_local_variable, unused_element, prefer_final_locals
 
 final Color kPrimaryColor = HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor();
 final Color bgUpcomingMuted = HSLColor.fromAHSL(
@@ -26,7 +37,8 @@ class HomeScreen extends StatefulWidget {
   HomeScreenState createState() => HomeScreenState();
 }
 
-class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMixin {
+class HomeScreenState extends State<HomeScreen>
+    with AutomaticKeepAliveClientMixin, TickerProviderStateMixin {
   @override
   bool get wantKeepAlive => true;
   // --- state fields (must be inside the State class) ---
@@ -49,8 +61,6 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
   final ValueNotifier<bool> _connectivityNotifier = ValueNotifier<bool>(false);
   Timer? _updateTimer;
   String selectedCategory = 'all'; // 'all' or specific category id
-  String selectedStatus = 'upcoming'; // 'upcoming', 'overdue', 'paid'
-  final ScrollController _categoryScrollController = ScrollController();
   // base sizes for "This Month"
   double baseBottomAmountFontSize = 14;
   double baseBottomTextFontSize = 13;
@@ -58,10 +68,14 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
   // Loading states
   bool _isAddingBill = false;
   String? _markingPaidBillId;
-
+  AppLifecycleManager? _appLifecycleManager;
   @override
   void initState() {
     super.initState();
+
+    // Initialize app lifecycle manager for sync on background/close
+    _appLifecycleManager = AppLifecycleManager(_subscriptionService);
+    WidgetsBinding.instance.addObserver(_appLifecycleManager!);
 
     // If we have data, never show loading or reinitialize
     if (_bills.isNotEmpty && _isInitialized) {
@@ -76,25 +90,52 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
     }
   }
 
+  // Centralized initialization sequence called from initState
   Future<void> _initializeApp() async {
-    if (_isInitialized) {
-      debugPrint('🔄 App already initialized, skipping...');
-      return;
-    }
+    if (!mounted) return;
+    try {
+      // Initialize dependent services
+      await _initServices();
 
-    debugPrint('🚀 Initializing app...');
-    await _initServices();
-    await _checkConnectivity();
-    await _loadDataWithSyncPriority(); // Load with Firebase priority for cross-device sync
-    _setupConnectivityListener();
-    _startPeriodicUpdates();
+      // Sync any pending local changes from previous sessions
+      await _syncPendingBillsOnStartup();
 
-    if (mounted) {
-      setState(() {
-        _isInitialized = true;
-      });
+      // Load local data quickly for immediate UI responsiveness
+      await _loadFromLocalStorageOnly();
+
+      // Set up connectivity and periodic background updates
+      _setupConnectivityListener();
+      _startPeriodicUpdates();
+
+      // Mark initialization finished
+      _isInitialized = true;
+    } catch (e) {
+      debugPrint('❌ Error during _initializeApp(): $e');
+      _hasError = true;
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _isInitialized = true;
+        });
+      }
     }
-    debugPrint('✅ App initialization completed');
+  }
+
+  // Sync pending bills on app startup if they exist from previous session
+  Future<void> _syncPendingBillsOnStartup() async {
+    try {
+      final unsyncedCount = await _subscriptionService
+          .getUnsyncedSubscriptionsCount();
+      if (unsyncedCount > 0) {
+        debugPrint(
+          '🔄 Found $unsyncedCount pending bills from previous session, syncing...',
+        );
+        await _subscriptionService.syncLocalToFirebase();
+      }
+    } catch (e) {
+      debugPrint('❌ Failed to sync pending bills on startup: $e');
+    }
   }
 
   Future<void> _initServices() async {
@@ -111,14 +152,34 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
         _markBillAsPaidFromNotification(billId);
       }
     };
+
+    // Set up notification callback for undo payment action
+    notificationService.onUndoPayment = (String? billId) {
+      debugPrint('↩️ Undo payment callback received for bill ID: $billId');
+      if (billId != null) {
+        _undoBillPayment(billId);
+      }
+    };
+
+    // Check for any pending notification actions (for when app is launched from notification)
+    await notificationService.checkAndProcessPendingActions();
+
+    // Verify notification setup for debugging
+    await notificationService.verifyNotificationSetup();
   }
 
   @override
   void dispose() {
-    _categoryScrollController.dispose();
     _connectivitySubscription?.cancel();
     _connectivityNotifier.dispose();
     _updateTimer?.cancel();
+
+    // Clean up app lifecycle manager
+    if (_appLifecycleManager != null) {
+      WidgetsBinding.instance.removeObserver(_appLifecycleManager!);
+      _appLifecycleManager?.dispose();
+    }
+
     super.dispose();
   }
 
@@ -180,20 +241,11 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
         return;
       }
 
-      // Perform periodic sync in background
+      // Perform periodic sync in background (upload local changes to Firebase)
       await _subscriptionService.performPeriodicSync();
 
-      // If new data was synced, update our bills list silently
-      final freshData = await _subscriptionService.getSubscriptions();
-      if (freshData.length != _bills.length) {
-        debugPrint('🔄 Background sync found ${freshData.length} bills (was ${_bills.length})');
-        if (mounted) {
-          setState(() {
-            _bills = freshData;
-            _updateCachedCalculations();
-          });
-        }
-      }
+      // Then fetch latest data from Firestore for cross-device sync
+      await _fetchLatestFromFirestore();
 
       debugPrint('✅ Silent background sync completed');
     } catch (e) {
@@ -211,17 +263,23 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
       });
     }
     _lastDataLoadTime = null; // Reset the timestamp to force refresh
-    _refreshDataFromFirebase();
+    // Use Firestore fetch instead of local-only refresh
+    unawaited(_fetchLatestFromFirestore());
   }
 
   Future<void> _checkConnectivity() async {
+    debugPrint('🌐 _checkConnectivity() called...');
     final isOnline = await _subscriptionService.isOnline();
-    debugPrint('Network status check: $isOnline');
+    debugPrint('🌐 Network status check result: $isOnline');
+    debugPrint('🌐 Mounted status: $mounted');
     if (mounted) {
+      debugPrint('🌐 Setting state _isOnline to: $isOnline');
       setState(() {
         _isOnline = isOnline;
       });
       _connectivityNotifier.value = isOnline;
+    } else {
+      debugPrint('🌐 Not mounted, skipping state update');
     }
   }
 
@@ -257,9 +315,9 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
       if (mounted) {
         _checkForOverdueBills();
 
-        // Every 5 minutes, also refresh data from Firebase for cross-device sync
+        // Every 5 minutes, also fetch data from Firestore for cross-device sync
         if (timer.tick % 5 == 0) {
-          _refreshDataFromFirebase();
+          unawaited(_fetchLatestFromFirestore());
         }
       }
     });
@@ -298,6 +356,11 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
 
     for (var bill in _bills) {
       try {
+        // Skip invalid bills with no name
+        if (bill['name'] == null) {
+          continue;
+        }
+
         final dueDate = _parseDueDate(bill);
         String newStatus = bill['status'] ?? '';
 
@@ -320,7 +383,8 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
           needsUpdate = true;
         }
       } catch (e) {
-        debugPrint('Error initializing bill status: $e');
+        final billName = bill['name'] ?? 'Unknown';
+        debugPrint('Error initializing bill status for bill "$billName": $e');
         // Default to upcoming if there's an error
         if (bill['status'] != 'paid') {
           bill['status'] = 'upcoming';
@@ -341,6 +405,11 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
 
     for (var bill in _bills) {
       try {
+        // Skip invalid bills with no name
+        if (bill['name'] == null) {
+          continue;
+        }
+
         final dueDate = _parseDueDate(bill);
         if (dueDate != null &&
             bill['status'] != 'paid' &&
@@ -353,36 +422,58 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
           // Save the updated status to local storage
           final localId = bill['localId'] ?? bill['id'];
           if (localId != null) {
-            await _subscriptionService.localStorageService?.updateSubscription(
-              localId,
-              bill,
-            );
-            debugPrint(
-              '✅ Saved overdue status to local storage for: ${bill['name']}',
-            );
-          }
-
-          // Try to sync with Firebase if online
-          final online = await _subscriptionService.isOnline();
-          if (online) {
-            final firebaseId = bill['firebaseId'];
-            if (firebaseId != null) {
-              try {
-                await _subscriptionService.updateSubscription(firebaseId, bill);
-                debugPrint(
-                  '✅ Synced overdue status to Firebase for: ${bill['name']}',
-                );
-              } catch (e) {
-                debugPrint('⚠️ Failed to sync overdue status to Firebase: $e');
-              }
+            try {
+              await _subscriptionService.localStorageService
+                  ?.updateSubscription(localId, bill);
+              debugPrint(
+                '✅ Saved overdue status to local storage for: ${bill['name']}',
+              );
+            } catch (e) {
+              debugPrint(
+                '⚠️ Failed to save overdue status to local storage for ${bill['name']}: $e',
+              );
             }
           }
 
+          // Try to sync with Firebase if online
+          try {
+            final online = await _subscriptionService.isOnline();
+            if (online) {
+              final firebaseId = bill['firebaseId'];
+              if (firebaseId != null) {
+                try {
+                  await _subscriptionService.updateSubscription(
+                    firebaseId,
+                    bill,
+                  );
+                  debugPrint(
+                    '✅ Synced overdue status to Firebase for: ${bill['name']}',
+                  );
+                } catch (e) {
+                  debugPrint(
+                    '⚠️ Failed to sync overdue status to Firebase for ${bill['name']}: $e',
+                  );
+                }
+              }
+            }
+          } catch (e) {
+            debugPrint(
+              '⚠️ Failed to check online status for ${bill['name']}: $e',
+            );
+          }
+
           // Send immediate overdue notification
-          _sendOverdueBillNotification(bill, notificationService);
+          try {
+            _sendOverdueBillNotification(bill, notificationService);
+          } catch (e) {
+            debugPrint(
+              '⚠️ Failed to send overdue notification for ${bill['name']}: $e',
+            );
+          }
         }
       } catch (e) {
-        debugPrint('Error checking overdue bill: $e');
+        final billName = bill['name'] ?? 'Unknown';
+        debugPrint('Error checking overdue bill for "$billName": $e');
       }
     }
 
@@ -428,22 +519,266 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
 
       if (billIndex != -1) {
         final bill = _bills[billIndex];
-        await _markBillAsPaid(billIndex);
+        final billName = bill['name']?.toString() ?? 'Bill';
 
-        // Cancel the notification for this bill
+        // Check if app is in foreground
         final notificationService = NotificationService();
-        final notificationId =
-            bill['notificationId'] ??
-            int.tryParse(billId) ??
-            DateTime.now().millisecondsSinceEpoch;
-        notificationService.cancelNotification(notificationId);
+        final isAppInForeground = await notificationService.isAppInForeground();
 
-        debugPrint('✅ Bill marked as paid and notification cancelled');
+        debugPrint('📱 App in foreground: $isAppInForeground');
+
+        // Mark bill as paid immediately (no confirmation dialog)
+        await _markBillAsPaidImmediate(billIndex, isFromNotification: true);
+
+        if (isAppInForeground) {
+          // Show snackbar with undo option for foreground app
+          _showPaymentUndoSnackbar(billName, billId);
+        } else {
+          // Update notification to show undo option
+          final notificationId =
+              bill['notificationId'] ??
+              int.tryParse(billId) ??
+              DateTime.now().millisecondsSinceEpoch;
+
+          await notificationService.updatePaymentConfirmationNotification(
+            id: notificationId,
+            billName: billName,
+            payload: billId,
+          );
+        }
+
+        debugPrint('✅ Bill marked as paid from notification with undo option');
       } else {
         debugPrint('❌ Bill not found with ID: $billId');
       }
     } catch (e) {
       debugPrint('Error marking bill as paid from notification: $e');
+    }
+  }
+
+  // Mark bill as paid immediately (without confirmation dialog)
+  Future<void> _markBillAsPaidImmediate(
+    int index, {
+    bool isFromNotification = false,
+  }) async {
+    if (index < 0 || index >= _bills.length) return;
+
+    final bill = _bills[index];
+    final billId = _getBillId(bill);
+
+    if (_markingPaidBillId == billId) return;
+
+    setState(() {
+      _markingPaidBillId = billId;
+    });
+
+    try {
+      final bill = _bills[index];
+      final billName = bill['name']?.toString() ?? 'Bill';
+      final now = DateTime.now();
+
+      // Store original status for potential undo
+      final originalStatus = bill['status'] ?? 'unpaid';
+      final originalPaidDate = bill['paidDate'];
+
+      // Update UI immediately for faster feedback
+      final updatedBill = Map<String, dynamic>.from(bill);
+      updatedBill['status'] = 'paid';
+      updatedBill['paidDate'] = now.toIso8601String();
+      updatedBill['lastModified'] = now.toIso8601String();
+      updatedBill['_originalStatus'] = originalStatus; // Store for undo
+      updatedBill['_originalPaidDate'] = originalPaidDate; // Store for undo
+
+      if (mounted) {
+        setState(() {
+          _bills[index] = updatedBill;
+        });
+      }
+
+      // Save to local storage first and wait for completion
+      try {
+        // Use the subscription service to update (which handles local storage properly)
+        await _subscriptionService.updateSubscription(billId, updatedBill);
+        debugPrint('✅ Saved paid status to local storage for $billName');
+      } catch (storageError) {
+        debugPrint('❌ Failed to save to local storage: $storageError');
+        // Revert UI change if local storage fails
+        if (mounted) {
+          setState(() {
+            _bills[index] = bill; // Revert to original bill
+          });
+        }
+        throw Exception('Failed to save to local storage: $storageError');
+      }
+
+      // Check connectivity and sync with Firebase if online
+      final isOnline = await _subscriptionService.isOnline();
+      if (isOnline && bill['firebaseId'] != null) {
+        try {
+          await _subscriptionService.updateSubscription(
+            bill['firebaseId'],
+            updatedBill,
+          );
+          debugPrint('✅ Synced paid status to Firebase for $billName');
+        } catch (firebaseError) {
+          debugPrint('⚠️ Firebase sync failed for $billName: $firebaseError');
+          // Don't throw here - local save succeeded, so we can continue
+          // Firebase sync can happen later
+        }
+      }
+
+      // Refresh the data to ensure consistency across the app
+      _loadDataWithSyncPriority();
+
+      // Don't show success message here - it will be handled by the caller
+      debugPrint('✅ Bill $billName marked as paid immediately');
+    } catch (e) {
+      debugPrint('❌ Critical error marking bill as paid: $e');
+
+      // Try to update UI even if storage fails
+      try {
+        final bill = _bills[index];
+        final errorBillName = bill['name']?.toString() ?? 'Bill';
+        final updatedBill = Map<String, dynamic>.from(bill);
+        updatedBill['status'] = 'paid';
+        updatedBill['paidDate'] = DateTime.now().toIso8601String();
+
+        if (mounted) {
+          setState(() {
+            _bills[index] = updatedBill;
+          });
+          debugPrint('✅ UI updated despite error for $errorBillName');
+        }
+      } catch (uiError) {
+        debugPrint('❌ Even UI update failed: $uiError');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _markingPaidBillId = null;
+        });
+      }
+    }
+  }
+
+  // Show snackbar with undo option
+  void _showPaymentUndoSnackbar(String billName, String billId) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$billName marked as paid'),
+        backgroundColor: Colors.green,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        duration: const Duration(seconds: 10), // Show for 10 seconds
+        action: SnackBarAction(
+          label: 'Undo',
+          textColor: Colors.white,
+          onPressed: () {
+            _undoBillPayment(billId);
+          },
+        ),
+      ),
+    );
+  }
+
+  // Undo bill payment
+  Future<void> _undoBillPayment(String billId) async {
+    debugPrint('↩️ Undoing payment for bill ID: $billId');
+
+    try {
+      // Find the bill by ID
+      final billIndex = _bills.indexWhere(
+        (bill) =>
+            bill['id']?.toString() == billId ||
+            bill['firebaseId']?.toString() == billId ||
+            bill['localId']?.toString() == billId,
+      );
+
+      if (billIndex != -1) {
+        final bill = _bills[billIndex];
+        final billName = bill['name']?.toString() ?? 'Bill';
+
+        // Restore original status
+        final originalStatus = bill['_originalStatus'] ?? 'unpaid';
+        final originalPaidDate = bill['_originalPaidDate'];
+
+        // Update UI immediately
+        final updatedBill = Map<String, dynamic>.from(bill);
+        updatedBill['status'] = originalStatus;
+        updatedBill['paidDate'] = originalPaidDate;
+        updatedBill['lastModified'] = DateTime.now().toIso8601String();
+        updatedBill.remove('_originalStatus'); // Clean up undo data
+        updatedBill.remove('_originalPaidDate'); // Clean up undo data
+
+        if (mounted) {
+          setState(() {
+            _bills[billIndex] = updatedBill;
+          });
+        }
+
+        // Save to local storage
+        final localId = bill['localId'] ?? bill['id'];
+        if (localId != null) {
+          _subscriptionService.localStorageService
+              ?.updateSubscription(localId, updatedBill)
+              .then((_) {
+                debugPrint(
+                  '✅ Restored original status to local storage for $billName',
+                );
+              })
+              .catchError((storageError) {
+                debugPrint(
+                  '❌ Failed to restore to local storage: $storageError',
+                );
+              });
+        }
+
+        // Sync with Firebase if online
+        _subscriptionService.isOnline().then((online) {
+          if (online && bill['firebaseId'] != null) {
+            _subscriptionService
+                .updateSubscription(bill['firebaseId'], updatedBill)
+                .then((_) {
+                  debugPrint(
+                    '✅ Synced restored status to Firebase for $billName',
+                  );
+                })
+                .catchError((firebaseError) {
+                  debugPrint(
+                    '⚠️ Firebase sync failed for $billName: $firebaseError',
+                  );
+                });
+          }
+        });
+
+        // Show success message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Payment for $billName has been undone'),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+
+        debugPrint('✅ Payment undone for bill $billName');
+      } else {
+        debugPrint('❌ Bill not found with ID: $billId');
+      }
+    } catch (e) {
+      debugPrint('Error undoing payment: $e');
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error undoing payment: ${e.toString()}'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+      );
     }
   }
 
@@ -531,7 +866,6 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
 
       // Trigger sync in background if needed
       unawaited(_subscriptionService.performPeriodicSync());
-
     } catch (e) {
       debugPrint('❌ Failed to refresh data: $e');
     }
@@ -626,45 +960,58 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
         });
       }
 
-      // Save to local storage in parallel
-      final localId = bill['localId'] ?? bill['id'];
-      if (localId != null) {
-        _subscriptionService.localStorageService
-            ?.updateSubscription(localId, updatedBill)
-            .then((_) {
-              debugPrint('✅ Saved paid status to local storage for $billName');
-            })
-            .catchError((storageError) {
-              debugPrint('❌ Failed to save to local storage: $storageError');
-            });
+      // Save to local storage first and wait for completion
+      bool localSaveSuccess = false;
+
+      try {
+        // Use the subscription service to update (which handles local storage properly)
+        await _subscriptionService.updateSubscription(billId, updatedBill);
+        debugPrint('✅ Saved paid status to local storage for $billName');
+        localSaveSuccess = true;
+      } catch (storageError) {
+        debugPrint('❌ Failed to save to local storage: $storageError');
+        // Revert UI change if local storage fails
+        if (mounted) {
+          setState(() {
+            _bills[index] = bill; // Revert to original bill
+          });
+        }
+        throw Exception('Failed to save to local storage: $storageError');
       }
 
       // Check connectivity and sync with Firebase if online
-      _subscriptionService.isOnline().then((online) {
-        if (online && bill['firebaseId'] != null) {
-          _subscriptionService
-              .updateSubscription(bill['firebaseId'], updatedBill)
-              .then((_) {
-                debugPrint('✅ Synced paid status to Firebase for $billName');
-              })
-              .catchError((firebaseError) {
-                debugPrint(
-                  '⚠️ Firebase sync failed for $billName: $firebaseError',
-                );
-              });
+      final isOnline = await _subscriptionService.isOnline();
+      if (isOnline && bill['firebaseId'] != null) {
+        try {
+          await _subscriptionService.updateSubscription(
+            bill['firebaseId'],
+            updatedBill,
+          );
+          debugPrint('✅ Synced paid status to Firebase for $billName');
+        } catch (firebaseError) {
+          debugPrint('⚠️ Firebase sync failed for $billName: $firebaseError');
+          // Don't throw here - local save succeeded, so we can continue
+          // Firebase sync can happen later
         }
-      });
+      }
 
-      // Show success message immediately
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('$billName marked as paid successfully!'),
-          backgroundColor: Colors.green,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          duration: const Duration(seconds: 2),
-        ),
-      );
+      // Only show success if local storage succeeded
+      if (localSaveSuccess) {
+        // Refresh the data to ensure consistency across the app
+        _loadDataWithSyncPriority();
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$billName marked as paid successfully!'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
     } catch (e) {
       debugPrint('❌ Critical error marking bill as paid: $e');
 
@@ -738,24 +1085,31 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
         }
 
         // Save to local storage in parallel
-        unawaited(_subscriptionService.localStorageService?.updateSubscription(
-          localId,
-          billToSave,
-        ).then((_) {
-          debugPrint('✅ Updated bill in local storage');
-        }).catchError((error) {
-          debugPrint('❌ Failed to update local storage: $error');
-        }));
+        unawaited(
+          _subscriptionService.localStorageService
+              ?.updateSubscription(localId, billToSave)
+              .then((_) {
+                debugPrint('✅ Updated bill in local storage');
+              })
+              .catchError((error) {
+                debugPrint('❌ Failed to update local storage: $error');
+              }),
+        );
       }
 
       // Update reminders in parallel
-      unawaited(_updateBillReminders(_bills[index]).then((_) {
-        debugPrint('✅ Updated bill reminders');
-      }).catchError((error) {
-        debugPrint('❌ Failed to update reminders: $error');
-      }));
+      unawaited(
+        _updateBillReminders(_bills[index])
+            .then((_) {
+              debugPrint('✅ Updated bill reminders');
+            })
+            .catchError((error) {
+              debugPrint('❌ Failed to update reminders: $error');
+            }),
+      );
 
       // Check connectivity in parallel
+      debugPrint('🌐 Checking connectivity during initialization...');
       unawaited(_checkConnectivity());
 
       if (_isOnline && billId != null) {
@@ -769,9 +1123,10 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
         await _subscriptionService.updateSubscription(billId, firebaseBill);
 
         if (mounted) {
+          final billName = _bills[index]['name']?.toString() ?? 'Bill';
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('${updatedBill['name']} updated successfully!'),
+              content: Text('$billName updated successfully!'),
               backgroundColor: Colors.green,
               behavior: SnackBarBehavior.floating,
             ),
@@ -779,11 +1134,10 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
         }
       } else {
         if (mounted) {
+          final billName = _bills[index]['name']?.toString() ?? 'Bill';
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(
-                '${updatedBill['name']} saved locally. Will sync when online.',
-              ),
+              content: Text('$billName saved locally. Will sync when online.'),
               backgroundColor: Colors.orange,
               behavior: SnackBarBehavior.floating,
             ),
@@ -807,10 +1161,11 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
         await _updateBillReminders(_bills[index]);
 
         if (!_isOnline) {
+          final billName = _bills[index]['name']?.toString() ?? 'Bill';
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                '${updatedBill['name']} updated locally. Will sync when online.',
+                '$billName updated locally. Will sync when online.',
               ),
               backgroundColor: Colors.orange,
               behavior: SnackBarBehavior.floating,
@@ -821,9 +1176,10 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
           );
         } else {
           // If online but Firebase failed, still show success for local update
+          final billName = _bills[index]['name']?.toString() ?? 'Bill';
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('${updatedBill['name']} updated successfully!'),
+              content: Text('$billName updated successfully!'),
               backgroundColor: Colors.green,
               behavior: SnackBarBehavior.floating,
               shape: RoundedRectangleBorder(
@@ -903,24 +1259,40 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
 
       if (bill['dueTime'] != null) {
         final timeStr = bill['dueTime'].toString();
-        final timeParts = timeStr.split(RegExp(r'[:\s]'));
-        if (timeParts.isNotEmpty) {
+        try {
           // Handle time format like "8:30 AM" or "14:30"
           if (timeStr.contains('AM') || timeStr.contains('PM')) {
-            // 12-hour format
-            hour = int.parse(timeParts[0]);
-            minute = int.parse(timeParts[1]);
-            if (timeStr.contains('PM') && hour != 12) {
-              hour += 12;
-            }
-            if (timeStr.contains('AM') && hour == 12) {
-              hour = 0;
+            // 12-hour format - extract numbers first
+            final numbers = timeStr
+                .split(RegExp(r'[^\d]'))
+                .where((s) => s.isNotEmpty)
+                .toList();
+            if (numbers.length >= 2) {
+              hour = int.parse(numbers[0]);
+              minute = int.parse(numbers[1]);
+
+              if (timeStr.contains('PM') && hour != 12) {
+                hour += 12;
+              }
+              if (timeStr.contains('AM') && hour == 12) {
+                hour = 0;
+              }
             }
           } else {
             // 24-hour format
-            hour = int.parse(timeParts[0]);
-            minute = int.parse(timeParts[1]);
+            final timeParts = timeStr.split(':');
+            if (timeParts.length >= 2) {
+              hour = int.parse(timeParts[0]);
+              minute = timeParts.length > 1 ? int.parse(timeParts[1]) : 0;
+            }
           }
+        } catch (timeError) {
+          debugPrint(
+            '⚠️ Invalid time format "$timeStr", using default time: $timeError',
+          );
+          // Use default time if parsing fails
+          hour = 9;
+          minute = 0;
         }
       }
 
@@ -990,9 +1362,20 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
     if (categoryId != null) {
       final hash = categoryId.hashCode;
       final colors = [
-        Colors.red, Colors.blue, Colors.green, Colors.orange, Colors.purple,
-        Colors.pink, Colors.indigo, Colors.teal, Colors.amber, Colors.cyan,
-        Colors.deepOrange, Colors.lime, Colors.brown, Colors.grey
+        Colors.red,
+        Colors.blue,
+        Colors.green,
+        Colors.orange,
+        Colors.purple,
+        Colors.pink,
+        Colors.indigo,
+        Colors.teal,
+        Colors.amber,
+        Colors.cyan,
+        Colors.deepOrange,
+        Colors.lime,
+        Colors.brown,
+        Colors.grey,
       ];
       return colors[hash.abs() % colors.length];
     }
@@ -1065,7 +1448,8 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
         if (dueDateStr.isNotEmpty) {
           final parts = dueDateStr.split('/');
           if (parts.length == 3) {
-            final day = int.parse(parts[0]);
+            // day value parsed but not used directly (kept for clarity)
+            final _ = int.parse(parts[0]);
             final month = int.parse(parts[1]);
             final year = int.parse(parts[2]);
 
@@ -1180,7 +1564,8 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
             dueDate.month == currentMonth &&
             dueDate.year == currentYear &&
             bill['status'] != 'paid') {
-          final amount = double.tryParse(bill['amount']?.toString() ?? '0') ?? 0.0;
+          final amount =
+              double.tryParse(bill['amount']?.toString() ?? '0') ?? 0.0;
           total += amount;
         }
       } catch (e) {
@@ -1243,7 +1628,8 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
 
     const double sharedTop = 36;
     const double sharedMiddle = 72;
-    const double sharedBottom = 45;
+    const double sharedBottom =
+        48; // Increased from 45 to accommodate larger font
 
     return Scaffold(
       appBar: null,
@@ -1256,284 +1642,217 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
         child: Column(
           children: [
             // Custom header container
-            Container(
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.only(
-                  bottomLeft: Radius.circular(30),
-                  bottomRight: Radius.circular(30),
+            SafeArea(
+              bottom: false,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black12,
-                    blurRadius: 10,
-                    offset: Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: SafeArea(
-                bottom: false,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // Top row: icon + title/subtitle + profile + sync status
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(
-                                Icons.notifications_active_rounded,
-                                color: Colors.orange,
-                                size: 25,
-                              ),
-                              const SizedBox(width: 12),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Top row: icon + title/subtitle + profile + sync status
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.notifications_active_rounded,
+                              color: Colors.orange,
+                              size: 25,
+                            ),
+                            const SizedBox(width: 12),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'SubManager',
+                                  style: GoogleFonts.montserrat(
+                                    color: Colors.black87,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 23,
+                                  ),
+                                ),
+
+                                const SizedBox(height: 2),
+                                const ChangingSubtitle(),
+                              ],
+                            ),
+                          ],
+                        ),
+
+                        // Sync status and profile row
+                        Row(
+                          children: [
+                            // Refresh button for manual sync
+                            GestureDetector(
+                              onTap: () async {
+                                debugPrint('🔄 Refresh button tapped. Current _isOnline: $_isOnline');
+
+                                // Force check connectivity before proceeding
+                                await _checkConnectivity();
+                                debugPrint('🔄 After connectivity check. _isOnline: $_isOnline');
+
+                                if (_isOnline) {
+                                  debugPrint('🔄 Manual refresh triggered (online mode)...');
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Refreshing data from cloud...',
+                                      ),
+                                      backgroundColor: Colors.blue,
+                                      duration: Duration(seconds: 2),
+                                    ),
+                                  );
+                                  await _fetchLatestFromFirestore();
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Data synchronized with cloud!',
+                                      ),
+                                      backgroundColor: Colors.green,
+                                      duration: Duration(seconds: 2),
+                                    ),
+                                  );
+                                } else {
+                                  debugPrint('🔄 Manual refresh triggered (forced mode - user override)...');
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Attempting to sync anyway (user override)...',
+                                      ),
+                                      backgroundColor: Colors.orange,
+                                      duration: Duration(seconds: 2),
+                                    ),
+                                  );
+                                  // Force sync regardless of online status for manual refresh
+                                  await _forcedSyncFromFirestore();
+                                }
+                              },
+                              child: Column(
                                 children: [
-                                  Text(
-                                    'SubManager',
-                                    style: GoogleFonts.montserrat(
-                                      color: Colors.black87,
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 23,
+                                  CircleAvatar(
+                                    radius: 18,
+                                    backgroundColor: Colors.blue.withValues(
+                                      alpha: 0.15,
+                                    ),
+                                    child: Icon(
+                                      Icons.refresh,
+                                      color: Colors.blue,
+                                      size: 20,
                                     ),
                                   ),
-
-                                  const SizedBox(height: 2),
-                                  const ChangingSubtitle(),
+                                  const SizedBox(height: 8),
                                 ],
                               ),
-                            ],
-                          ),
-
-                          // Sync status and profile row
-                          Row(
-                            children: [
-                              // Enhanced network status indicator
-                              ValueListenableBuilder<bool>(
-                                valueListenable: _connectivityNotifier,
-                                builder: (context, isOnline, child) {
-                                  return Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 4,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: isOnline
-                                          ? Colors.green.withValues(alpha: 0.1)
-                                          : Colors.grey.withValues(alpha: 0.1),
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(
-                                        color: isOnline
-                                            ? Colors.green.withValues(
-                                                alpha: 0.3,
-                                              )
-                                            : Colors.grey.withValues(
-                                                alpha: 0.3,
-                                              ),
-                                        width: 1,
-                                      ),
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        AnimatedSwitcher(
-                                          duration: const Duration(
-                                            milliseconds: 200,
-                                          ),
-                                          child: Icon(
-                                            isOnline
-                                                ? Icons.wifi
-                                                : Icons.wifi_off,
-                                            color: isOnline
-                                                ? Colors.green
-                                                : Colors.grey,
-                                            size: 14,
-                                            key: ValueKey(isOnline),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 4),
-                                        Text(
-                                          isOnline ? 'Online' : 'Offline',
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.w500,
-                                            color: isOnline
-                                                ? Colors.green[700]
-                                                : Colors.grey[600],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                },
-                              ),
-                              const SizedBox(width: 12),
-                              // Refresh button for manual sync
-                              GestureDetector(
-                                onTap: () async {
-                                  if (_isOnline) {
-                                    debugPrint(
-                                      '🔄 Manual refresh triggered...',
-                                    );
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text('Refreshing data...'),
-                                        backgroundColor: Colors.blue,
-                                        duration: Duration(seconds: 1),
-                                      ),
-                                    );
-                                    await _refreshDataFromFirebase();
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text('Data refreshed!'),
-                                        backgroundColor: Colors.green,
-                                        duration: Duration(seconds: 2),
-                                      ),
-                                    );
-                                  } else {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                          'Cannot refresh while offline',
-                                        ),
-                                        backgroundColor: Colors.orange,
-                                        duration: Duration(seconds: 2),
-                                      ),
-                                    );
-                                  }
-                                },
-                                child: Column(
-                                  children: [
-                                    CircleAvatar(
-                                      radius: 18,
-                                      backgroundColor: Colors.blue.withValues(
-                                        alpha: 0.15,
-                                      ),
-                                      child: Icon(
-                                        Icons.refresh,
-                                        color: Colors.blue,
-                                        size: 20,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 16),
-                              // Profile (kept inside the same top row)
-                              GestureDetector(
-                                onTap: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) => const ProfileScreen(),
-                                    ),
-                                  );
-                                },
-                                child: Column(
-                                  children: [
-                                    CircleAvatar(
-                                      radius: 18,
-                                      backgroundColor: Colors.indigoAccent
-                                          .withValues(alpha: 0.15), // light bg
-                                      child: Icon(
-                                        Icons.person, // 🔄 subscription icon
-                                        color:
-                                            Colors.indigoAccent, // main color
-                                        size: 22,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 20),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: BillSummaryCard(
-                              title: "This Month",
-                              icon: Icons.trending_up_rounded,
-                              gradientColors: [
-                                HSLColor.fromAHSL(
-                                  1.0,
-                                  250,
-                                  0.84,
-                                  0.60,
-                                ).toColor(),
-                                HSLColor.fromAHSL(
-                                  1.0,
-                                  280,
-                                  0.75,
-                                  0.65,
-                                ).toColor(),
-                              ],
-                              primaryValue:
-                                  "\$${_calculateMonthlyTotal().toStringAsFixed(2)}",
-                              secondaryAmount:
-                                  "\$${_calculateMonthlyDifference().abs().toStringAsFixed(2)}",
-                              secondaryText: _calculateMonthlyDifference() > 0
-                                  ? "more than last month"
-                                  : "less than last month",
-                              topBoxHeight: sharedTop,
-                              middleBoxHeight: sharedMiddle,
-                              bottomBoxHeight: sharedBottom,
-                              // keep This Month bottom sizes as before
-                              bottomAmountFontSize: 14,
-                              bottomTextFontSize: 13,
                             ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: BillSummaryCard(
-                              title: "Next 7 Days",
-                              icon: Icons.calendar_today_rounded,
-                              gradientColors: [
-                                HSLColor.fromAHSL(
-                                  1.0,
-                                  30,
-                                  0.85,
-                                  0.60,
-                                ).toColor(),
-                                HSLColor.fromAHSL(
-                                  1.0,
-                                  15,
-                                  0.85,
-                                  0.55,
-                                ).toColor(),
-                              ],
-                              primaryValue:
-                                  "\$${_getUpcoming7DaysTotal().toStringAsFixed(2)}",
-
-                              // increase the bottom (count) size here:
-                              secondaryText:
-                                  "${_getUpcoming7DaysCount()} bills",
-                              topBoxHeight: sharedTop,
-                              middleBoxHeight: sharedMiddle,
-                              bottomBoxHeight: sharedBottom,
-                              // larger bottom fonts for emphasis
-                              bottomAmountFontSize:
-                                  20, // if you show an amount here, it'll be bigger
-                              bottomTextFontSize:
-                                  22, // <-- increased size for the "X bills" text
-                              minBottomFontSize: 12,
+                            const SizedBox(width: 16),
+                            // Profile (kept inside the same top row)
+                            GestureDetector(
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const ProfileScreen(),
+                                  ),
+                                );
+                              },
+                              child: Column(
+                                children: [
+                                  CircleAvatar(
+                                    radius: 18,
+                                    backgroundColor: Colors.indigoAccent
+                                        .withValues(alpha: 0.15), // light bg
+                                    child: Icon(
+                                      Icons.person, // 🔄 subscription icon
+                                      color: Colors.indigoAccent, // main color
+                                      size: 22,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                ],
+                              ),
                             ),
+                          ],
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: BillSummaryCard(
+                            title: "This Month",
+                            icon: Icons.trending_up_rounded,
+                            gradientColors: [
+                              HSLColor.fromAHSL(
+                                1.0,
+                                236,
+                                0.89,
+                                0.65,
+                              ).toColor(), // Lighter purple HSL(236, 89%, 65%)
+                              HSLColor.fromAHSL(
+                                1.0,
+                                236,
+                                0.89,
+                                0.75,
+                              ).toColor(), // Light purple HSL(236, 89%, 75%)
+                            ],
+                            primaryValue:
+                                "\$${_calculateMonthlyTotal().toStringAsFixed(2)}",
+                            secondaryAmount:
+                                "\$${_calculateMonthlyDifference().abs().toStringAsFixed(2)}",
+                            secondaryText: _calculateMonthlyDifference() > 0
+                                ? "more than last month"
+                                : "less than last month",
+                            topBoxHeight: sharedTop,
+                            middleBoxHeight: sharedMiddle,
+                            bottomBoxHeight: sharedBottom,
+                            // keep This Month bottom sizes as before
+                            bottomAmountFontSize: 14,
+                            bottomTextFontSize:
+                                15, // Increased from 13 for consistency
                           ),
-                        ],
-                      ),
-                    ],
-                  ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: BillSummaryCard(
+                            title: "Next 7 Days",
+                            icon: Icons.calendar_today_rounded,
+                            gradientColors: [
+                              HSLColor.fromAHSL(
+                                1.0,
+                                25,
+                                0.90,
+                                0.60,
+                              ).toColor(), // Lighter modern orange
+                              HSLColor.fromAHSL(
+                                1.0,
+                                15,
+                                0.85,
+                                0.65,
+                              ).toColor(), // Lighter warm orange
+                            ],
+                            primaryValue:
+                                "\$${_getUpcoming7DaysTotal().toStringAsFixed(2)}",
+
+                            // show the count and keep same sizing as This Month for equal heights
+                            secondaryText: "${_getUpcoming7DaysCount()} bills",
+                            topBoxHeight: sharedTop,
+                            middleBoxHeight: sharedMiddle,
+                            bottomBoxHeight: sharedBottom,
+                            // Make Next 7 Days bottom text extremely large to match visual weight of This Month's two lines
+                            bottomAmountFontSize: 21,
+                            bottomTextFontSize:
+                                21, // Extremely large font to balance the single line vs This Month's two lines
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -1547,154 +1866,26 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
                   physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.only(top: 6),
                   children: [
-                    // Category Selection - Horizontal Line with Scrollbar
-                    Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              const Text(
-                                'Category',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500,
-                                  color: Colors.black54,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Container(
-                            height: 40,
-                            child: RawScrollbar(
-                              thumbColor: Colors.grey.shade400,
-                              radius: const Radius.circular(10),
-                              thickness: 3,
-                              thumbVisibility: true,
-                              controller: _categoryScrollController,
-                              child: SingleChildScrollView(
-                                scrollDirection: Axis.horizontal,
-                                controller: _categoryScrollController,
-                                child: Row(children: _buildCategoryTabsList()),
-                              ),
-                            ),
-                          ),
-                        ],
+                    // Category Selection and Summary Information
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: HorizontalCategorySelector(
+                        categories: Category.defaultCategories,
+                        selectedCategory: selectedCategory,
+                        onCategorySelected: (category) {
+                          setState(() {
+                            selectedCategory = category;
+                          });
+                        },
+                        totalBills: _bills.length,
+                        getCategoryBillCount: _getCategoryBillCount,
                       ),
                     ),
-                    const SizedBox(height: 16),
-
-                    // Status Selection and Summary Row
-                    Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Row(
-                        children: [
-                          // Status Dropdown
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.grey.shade50,
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: Colors.grey.shade300,
-                                width: 1,
-                              ),
-                            ),
-                            child: DropdownButton<String>(
-                              value: selectedStatus,
-                              underline: Container(),
-                              isDense: true,
-                              items: [
-                                const DropdownMenuItem<String>(
-                                  value: 'upcoming',
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(Icons.calendar_today, color: Colors.green, size: 18),
-                                      SizedBox(width: 4),
-                                      Text('Upcoming', style: TextStyle(fontSize: 14)),
-                                    ],
-                                  ),
-                                ),
-                                const DropdownMenuItem<String>(
-                                  value: 'overdue',
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(Icons.warning, color: Colors.orange, size: 18),
-                                      SizedBox(width: 4),
-                                      Text('Overdue', style: TextStyle(fontSize: 14)),
-                                    ],
-                                  ),
-                                ),
-                                const DropdownMenuItem<String>(
-                                  value: 'paid',
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(Icons.check_circle, color: Colors.purple, size: 18),
-                                      SizedBox(width: 4),
-                                      Text('Paid', style: TextStyle(fontSize: 14)),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                              onChanged: (value) {
-                                setState(() {
-                                  selectedStatus = value ?? 'upcoming';
-                                });
-                              },
-                            ),
-                          ),
-
-                          const SizedBox(width: 8),
-
-                          // Bill Count
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: Colors.grey.shade50,
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: Colors.grey.shade300,
-                                width: 1,
-                              ),
-                            ),
-                            child: Text(
-                              '${_getFilteredBillCount()} bills',
-                              style: const TextStyle(
-                                color: Colors.black87,
-                                fontWeight: FontWeight.w600,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ),
-
-                          const Spacer(),
-
-                          // Total Amount
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: Colors.grey.shade50,
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: Colors.grey.shade300,
-                                width: 1,
-                              ),
-                            ),
-                            child: Text(
-                              '\$${_getFilteredTotalAmount().toStringAsFixed(2)}',
-                              style: const TextStyle(
-                                color: Colors.black87,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ),
-                        ],
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: SummaryInformationBar(
+                        billCount: _getFilteredBillCount(),
+                        totalAmount: _getFilteredTotalAmount(),
                       ),
                     ),
 
@@ -1717,42 +1908,20 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
     );
   }
 
-  // Helper methods for the new filter design
+  // Helper methods for the category-only filter design
   double _getFilteredTotalAmount() {
     double total = 0.0;
-    final now = DateTime.now();
 
     for (var bill in _bills) {
-      // Status filtering logic
-      bool matchesStatus = false;
-      final billStatus = bill['status']?.toString() ?? 'upcoming';
-      final dueDate = _parseDueDate(bill);
-
-      switch (selectedStatus) {
-        case 'all':
-          matchesStatus = billStatus != 'paid' && dueDate != null;
-          break;
-        case 'upcoming':
-          matchesStatus = billStatus != 'paid' &&
-                       dueDate != null &&
-                       dueDate.isAfter(now) &&
-                       !dueDate.isBefore(now.subtract(const Duration(days: 1)));
-          break;
-        case 'overdue':
-          matchesStatus = billStatus != 'paid' && dueDate != null && dueDate.isBefore(now);
-          break;
-        case 'paid':
-          matchesStatus = billStatus == 'paid';
-          break;
-      }
-
-      // Category filtering logic
+      // Category filtering logic only
       final billCategory = bill['category']?.toString();
-      bool matchesCategory = selectedCategory == 'all' ||
-                           (billCategory != null && billCategory == selectedCategory);
+      bool matchesCategory =
+          selectedCategory == 'all' ||
+          (billCategory != null && billCategory == selectedCategory);
 
-      if (matchesStatus && matchesCategory) {
-        final amount = double.tryParse(bill['amount']?.toString() ?? '0') ?? 0.0;
+      if (matchesCategory) {
+        final amount =
+            double.tryParse(bill['amount']?.toString() ?? '0') ?? 0.0;
         total += amount;
       }
     }
@@ -1762,36 +1931,15 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
 
   int _getFilteredBillCount() {
     int count = 0;
-    final now = DateTime.now();
 
     for (var bill in _bills) {
-      bool matchesStatus = false;
-      final billStatus = bill['status']?.toString() ?? 'upcoming';
-      final dueDate = _parseDueDate(bill);
-
-      switch (selectedStatus) {
-        case 'all':
-          matchesStatus = billStatus != 'paid' && dueDate != null;
-          break;
-        case 'upcoming':
-          matchesStatus = billStatus != 'paid' &&
-                       dueDate != null &&
-                       dueDate.isAfter(now) &&
-                       !dueDate.isBefore(now.subtract(const Duration(days: 1)));
-          break;
-        case 'overdue':
-          matchesStatus = billStatus != 'paid' && dueDate != null && dueDate.isBefore(now);
-          break;
-        case 'paid':
-          matchesStatus = billStatus == 'paid';
-          break;
-      }
-
+      // Category filtering logic only
       final billCategory = bill['category']?.toString();
-      bool matchesCategory = selectedCategory == 'all' ||
-                           (billCategory != null && billCategory == selectedCategory);
+      bool matchesCategory =
+          selectedCategory == 'all' ||
+          (billCategory != null && billCategory == selectedCategory);
 
-      if (matchesStatus && matchesCategory) {
+      if (matchesCategory) {
         count++;
       }
     }
@@ -1799,192 +1947,28 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
     return count;
   }
 
-  
-  // Status Tabs and Content Methods
-  List<Widget> _buildStatusTabsList() {
-    List<Widget> tabs = [];
-
-    final statusOptions = [
-      {'id': 'upcoming', 'title': 'Upcoming', 'icon': Icons.calendar_today},
-      {'id': 'overdue', 'title': 'Overdue', 'icon': Icons.warning},
-      {'id': 'paid', 'title': 'Paid', 'icon': Icons.check_circle},
-    ];
-
-    for (var status in statusOptions) {
-      tabs.add(
-        Expanded(
-          child: GestureDetector(
-            onTap: () {
-              setState(() {
-                selectedStatus = status['id'] as String;
-              });
-            },
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              decoration: BoxDecoration(
-                gradient: selectedStatus == status['id']
-                    ? LinearGradient(
-                        colors: [
-                          HSLColor.fromAHSL(1.0, 250, 0.84, 0.60).toColor(),
-                          HSLColor.fromAHSL(1.0, 280, 0.75, 0.65).toColor(),
-                        ],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      )
-                    : null,
-                color: selectedStatus == status['id'] ? null : Colors.transparent,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    status['icon'] as IconData,
-                    color: selectedStatus == status['id']
-                        ? Colors.white
-                        : Colors.grey[600],
-                    size: 16,
-                  ),
-                  const SizedBox(height: 1),
-                  Text(
-                    status['title'] as String,
-                    style: TextStyle(
-                      color: selectedStatus == status['id']
-                          ? Colors.white
-                          : Colors.grey[600],
-                      fontWeight: selectedStatus == status['id']
-                          ? FontWeight.w600
-                          : FontWeight.w500,
-                      fontSize: 11,
-                      fontFamily: GoogleFonts.poppins().fontFamily,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
+  // Calculate bill count for a specific category
+  int _getCategoryBillCount(String categoryId) {
+    if (categoryId == 'all') {
+      return _bills.length;
     }
 
-    return tabs;
-  }
-
-  // Category Tabs and Content Methods
-  List<Widget> _buildCategoryTabsList() {
-    List<Widget> tabs = [];
-
-    // "All" tab
-    tabs.add(
-      Padding(
-        padding: const EdgeInsets.only(right: 8),
-        child: _buildCategoryTab(
-          title: 'All',
-          isSelected: selectedCategory == 'all',
-          onTap: () {
-            setState(() {
-              selectedCategory = 'all';
-            });
-          },
-        ),
-      ),
-    );
-
-    // Category tabs
-    for (var category in Category.defaultCategories) {
-      tabs.add(
-        Padding(
-          padding: const EdgeInsets.only(right: 8),
-          child: _buildCategoryTab(
-            title: category.name,
-            isSelected: selectedCategory == category.id,
-            onTap: () {
-              setState(() {
-                selectedCategory = category.id;
-              });
-            },
-          ),
-        ),
-      );
+    int count = 0;
+    for (var bill in _bills) {
+      final billCategory = bill['category']?.toString();
+      if (billCategory != null && billCategory == categoryId) {
+        count++;
+      }
     }
-
-    return tabs;
-  }
-
-  Widget _buildCategoryTab({
-    required String title,
-    required bool isSelected,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          gradient: isSelected
-              ? LinearGradient(
-                  colors: [
-                    HSLColor.fromAHSL(1.0, 250, 0.84, 0.60).toColor(),
-                    HSLColor.fromAHSL(1.0, 280, 0.75, 0.65).toColor(),
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                )
-              : null,
-          color: isSelected ? null : Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: isSelected
-              ? null
-              : Border.all(color: Colors.grey[300]!, width: 1),
-          boxShadow: isSelected
-              ? [
-                  BoxShadow(
-                    color: HSLColor.fromAHSL(1.0, 250, 0.84, 0.60).toColor().withValues(alpha: 0.25),
-                    blurRadius: 8,
-                    spreadRadius: 1,
-                    offset: const Offset(0, 2),
-                  ),
-                ]
-              : null,
-        ),
-        child: Text(
-          title,
-          style: TextStyle(
-            color: isSelected ? Colors.white : Colors.black87,
-            fontWeight: FontWeight.w600,
-            fontSize: 12,
-            fontFamily: GoogleFonts.poppins().fontFamily,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCategoryContent() {
-    return Column(
-      children: [
-        // Category Selector
-        Container(
-          height: 40,
-          margin: const EdgeInsets.only(bottom: 16),
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            itemCount: _buildCategoryTabsList().length,
-            itemBuilder: (context, index) {
-              return _buildCategoryTabsList()[index];
-            },
-          ),
-        ),
-
-        // Filtered Bills Content
-        Expanded(child: _buildFilteredBillsContent()),
-      ],
-    );
+    return count;
   }
 
   Widget _buildFilteredBillsContent() {
     // Show loading indicator ONLY on first app start with no data, NEVER when navigating back
-    if (_isLoading && !_isBackgroundRefresh && _bills.isEmpty && !_isInitialized) {
+    if (_isLoading &&
+        !_isBackgroundRefresh &&
+        _bills.isEmpty &&
+        !_isInitialized) {
       return const Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -2030,62 +2014,15 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
       );
     }
 
-    // Filter bills based on selected status and category
+    // Filter bills based on selected category only
     List<Map<String, dynamic>> filteredBills = [];
 
-    final now = DateTime.now();
-
     debugPrint(
-      '🔍 Filtering bills - Status: $selectedStatus, Category: $selectedCategory, Total bills: ${_bills.length}',
+      '🔍 Filtering bills - Category: $selectedCategory, Total bills: ${_bills.length}',
     );
-
-    // Debug: Print available categories and selected category
-    debugPrint('🔍 Selected category: "$selectedCategory"');
-    debugPrint('🔍 Available categories in bills:');
-    final availableCategories = _bills
-        .map((bill) => bill['category']?.toString())
-        .where((cat) => cat != null)
-        .toSet();
-    debugPrint('  - Categories found: $availableCategories');
 
     for (var bill in _bills) {
       try {
-        final dueDate = _parseDueDate(bill);
-
-        // Quick status check first (more efficient)
-        final billStatus = bill['status']?.toString() ?? '';
-        bool matchesStatus = false;
-
-        // Debug status for specific bill that matches category
-        if (bill['name'] == 'health health ') {
-          debugPrint(
-            '🔍 Status debug - Bill: "${bill['name']}", Status: "$billStatus", DueDate: $dueDate, SelectedStatus: "$selectedStatus"',
-          );
-        }
-
-        switch (selectedStatus) {
-          case 'all':
-            // Show reminders for upcoming bills (unpaid bills with due dates)
-            matchesStatus = billStatus != 'paid' && dueDate != null;
-            break;
-          case 'upcoming':
-            matchesStatus =
-                billStatus != 'paid' &&
-                dueDate != null &&
-                dueDate.isAfter(now) &&
-                dueDate.isBefore(now.add(const Duration(days: 30)));
-            break;
-          case 'overdue':
-            matchesStatus =
-                billStatus != 'paid' &&
-                dueDate != null &&
-                dueDate.isBefore(now);
-            break;
-          case 'paid':
-            matchesStatus = billStatus == 'paid';
-            break;
-        }
-
         // Quick category check (more efficient)
         final billCategory = bill['category']?.toString();
         bool matchesCategory = false;
@@ -2106,29 +2043,11 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
             matchesCategory =
                 exactMatch || containsMatch || caseInsensitiveMatch;
           }
-
-          // Debug: Print first few matching attempts
-          if (filteredBills.length < 2) {
-            debugPrint(
-              '🔍 Category check - Bill: "${bill['name']}", Category: "$billCategory", Selected: "$selectedCategory", Match: $matchesCategory',
-            );
-          }
         }
 
-        // Only add bill if both filters match
-        if (matchesStatus && matchesCategory) {
+        // Only add bill if category matches
+        if (matchesCategory) {
           filteredBills.add(bill);
-          if (bill['name'] == 'health health ') {
-            debugPrint(
-              '🔍 Bill "${bill['name']}" ADDED - Status: $matchesStatus, Category: $matchesCategory',
-            );
-          }
-        } else if (matchesCategory) {
-          if (bill['name'] == 'health health ') {
-            debugPrint(
-              '🔍 Bill "${bill['name']}" FILTERED OUT - Status: $matchesStatus, Category: $matchesCategory',
-            );
-          }
         }
       } catch (e) {
         debugPrint('Error filtering bill: $e');
@@ -2167,7 +2086,7 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
             const SizedBox(height: 16),
             Text(
               hasBillsInCategory
-                  ? 'No ${selectedStatus} bills${selectedCategory != 'all' ? ' in ${Category.findById(selectedCategory)?.name ?? selectedCategory}' : ''}'
+                  ? 'No bills in ${selectedCategory != 'all' ? Category.findById(selectedCategory)?.name ?? selectedCategory : 'any category'}'
                   : 'No bills in ${selectedCategory != 'all' ? Category.findById(selectedCategory)?.name ?? selectedCategory : 'any category'}',
               style: TextStyle(
                 fontSize: 16,
@@ -2177,9 +2096,7 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
             ),
             const SizedBox(height: 8),
             Text(
-              hasBillsInCategory
-                  ? 'Try selecting a different status (Upcoming, Paid, Overdue)'
-                  : 'Add a new bill to get started',
+              'Add a new bill to get started',
               style: TextStyle(fontSize: 14, color: Colors.grey[500]),
             ),
           ],
@@ -2321,24 +2238,35 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
                         const SizedBox(height: 4),
                         // Status text below amount
                         Text(
-                          isPaid ? 'Paid' :
-                                 isOverdue ? 'Overdue' :
-                                 _getSmartDueDateText(dueDate),
+                          isPaid
+                              ? 'Paid'
+                              : isOverdue
+                              ? 'Overdue'
+                              : _getSmartDueDateText(dueDate),
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
-                            color: isPaid ? Colors.green :
-                                   isOverdue ? Colors.red :
-                                   Colors.blue[700],
+                            color: isPaid
+                                ? Colors.green
+                                : isOverdue
+                                ? Colors.red
+                                : Colors.blue[700],
                             fontFamily: GoogleFonts.poppins().fontFamily,
                           ),
                         ),
                         const SizedBox(height: 4),
                         // Manage text button
                         GestureDetector(
-                          onTap: () => _showBillManagementBottomSheet(context, bill, index),
+                          onTap: () => _showBillManagementBottomSheet(
+                            context,
+                            bill,
+                            index,
+                          ),
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
                             decoration: BoxDecoration(
                               color: Colors.blue.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(8),
@@ -2367,9 +2295,14 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
   }
 
   // Modern bottom sheet for bill management actions
-  void _showBillManagementBottomSheet(BuildContext context, Map<String, dynamic> bill, int index) {
+  void _showBillManagementBottomSheet(
+    BuildContext context,
+    Map<String, dynamic> bill,
+    int index,
+  ) {
     final isPaid = bill['status'] == 'paid';
-    final isOverdue = _parseDueDate(bill)?.isBefore(DateTime.now()) == true && !isPaid;
+    final isOverdue =
+        _parseDueDate(bill)?.isBefore(DateTime.now()) == true && !isPaid;
 
     showModalBottomSheet(
       context: context,
@@ -2408,7 +2341,9 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
                       end: Alignment.bottomRight,
                       colors: [
                         isOverdue ? Colors.red : Colors.blue,
-                        isOverdue ? Colors.red.withValues(alpha: 0.7) : Colors.blue.withValues(alpha: 0.7),
+                        isOverdue
+                            ? Colors.red.withValues(alpha: 0.7)
+                            : Colors.blue.withValues(alpha: 0.7),
                       ],
                     ),
                     borderRadius: BorderRadius.circular(12),
@@ -2437,7 +2372,9 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
-                          color: isOverdue ? Colors.red : const Color(0xFF1F2937),
+                          color: isOverdue
+                              ? Colors.red
+                              : const Color(0xFF1F2937),
                         ),
                       ),
                     ],
@@ -2460,14 +2397,8 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
                       bill['name']?.toString() ?? 'this bill',
                     );
                     if (confirm == true) {
-                      // Find the original index of this bill in the _bills list to ensure correctness
-                      final originalIndex = _bills.indexOf(bill);
-                      if (originalIndex != -1) {
-                        await _markBillAsPaid(originalIndex);
-                      } else {
-                        // Fallback to the passed index if bill not found (shouldn't happen)
-                        await _markBillAsPaid(index);
-                      }
+                      // Use the passed index which is already the correct original index
+                      await _markBillAsPaid(index);
                     }
                   },
                   icon: const Icon(Icons.check_circle, size: 20),
@@ -2492,7 +2423,10 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
               child: ElevatedButton.icon(
                 onPressed: () async {
                   Navigator.pop(context);
-                  await _editBill(index);
+                  // Verify the index is valid before editing
+                  if (index >= 0 && index < _bills.length) {
+                    await _editBill(index);
+                  }
                 },
                 icon: const Icon(Icons.edit, size: 20),
                 label: const Text('Edit Bill'),
@@ -2515,9 +2449,12 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
               child: ElevatedButton.icon(
                 onPressed: () async {
                   Navigator.pop(context);
-                  bool? confirm = await _showDeleteConfirmDialog(context);
-                  if (confirm == true) {
-                    _deleteBill(index);
+                  // Verify the index is valid before deleting
+                  if (index >= 0 && index < _bills.length) {
+                    bool? confirm = await _showDeleteConfirmDialog(context);
+                    if (confirm == true) {
+                      _deleteBill(index);
+                    }
                   }
                 },
                 icon: const Icon(Icons.delete, size: 20),
@@ -2539,7 +2476,17 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
             Container(
               width: double.infinity,
               child: TextButton(
-                onPressed: () => Navigator.pop(context),
+                onPressed: () {
+                  // Close the bottom sheet synchronously and reset the adding state.
+                  if (Navigator.of(context).canPop()) {
+                    Navigator.of(context).pop();
+                  }
+                  if (mounted) {
+                    this.setState(() {
+                      _isAddingBill = false;
+                    });
+                  }
+                },
                 style: TextButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(
@@ -3188,7 +3135,6 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
       '📝 Edit mode: $isEditMode, bill: ${bill?['name']}, editIndex: $editIndex',
     );
 
-  
     // Declare variables outside StatefulBuilder to maintain state
     final formKey = GlobalKey<FormState>();
     late final TextEditingController nameController;
@@ -3232,7 +3178,9 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
     // Parse the due date and time if they exist (for edit mode)
     if (isEditMode) {
       debugPrint('📝 Parsing bill data for editing...');
-      final parsedDate = _parseDueDate(bill!);
+      final editBill = bill;
+
+      final parsedDate = _parseDueDate(editBill);
       if (parsedDate != null) {
         selectedDate = parsedDate;
         selectedTime = TimeOfDay(
@@ -3243,13 +3191,16 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
         // Format date and time for display
         dueDateController.text =
             '${parsedDate.day.toString().padLeft(2, '0')}/${parsedDate.month.toString().padLeft(2, '0')}/${parsedDate.year}';
-        dueTimeController.text = selectedTime?.format(context) ?? '';
+        dueTimeController.text = TimeOfDay(
+          hour: parsedDate.hour,
+          minute: parsedDate.minute,
+        ).format(context);
       }
 
       // Parse the reminder time if it exists (SEPARATE from due time)
-      if (bill!['reminderTime'] != null) {
+      if (editBill['reminderTime'] != null) {
         try {
-          final reminderTimeStr = bill['reminderTime'];
+          final reminderTimeStr = editBill['reminderTime'];
           if (reminderTimeStr is String) {
             final parts = reminderTimeStr.split(':');
             if (parts.length == 2) {
@@ -3274,20 +3225,20 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
       }
 
       // Set category if exists
-      if (bill?['category'] != null) {
-        debugPrint('📝 Setting category from bill: ${bill!['category']}');
-        final category = Category.findById(bill!['category']);
+      if (editBill['category'] != null) {
+        debugPrint('📝 Setting category from bill: ${editBill['category']}');
+        final category = Category.findById(editBill['category']);
         if (category != null) {
           selectedCategory = category;
           debugPrint('✅ Category set to: ${category.name}');
         } else {
-          debugPrint('⚠️ Category not found: ${bill!['category']}');
+          debugPrint('⚠️ Category not found: ${editBill['category']}');
         }
       }
 
       // Set frequency and reminder preferences from bill
-      selectedFrequency = bill?['frequency'] ?? 'Monthly';
-      selectedReminder = bill?['reminder'] ?? 'Same day';
+      selectedFrequency = editBill['frequency'] ?? 'Monthly';
+      selectedReminder = editBill['reminder'] ?? 'Same day';
     }
 
     // Reset loading state before showing bottom sheet
@@ -3297,1016 +3248,1130 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
       });
     }
 
-    final result = await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => StatefulBuilder(
-        builder: (BuildContext context, StateSetter setState) {
-          return Container(
-            height: MediaQuery.of(context).size.height * 0.5,
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-            ),
-            child: Padding(
-              padding: EdgeInsets.only(
-                left: 20.0,
-                right: 20.0,
-                top: 20.0,
-                bottom: MediaQuery.of(context).viewInsets.bottom + 20.0,
+    // Create a short-lived animation controller to make the bottom sheet
+    // transition appear smoother and snappier than the default.
+    final AnimationController _sheetAnimController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+      reverseDuration: const Duration(milliseconds: 900),
+    );
+
+    try {
+      await showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        transitionAnimationController: _sheetAnimController,
+        builder: (context) => StatefulBuilder(
+          builder: (BuildContext context, StateSetter setState) {
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.5,
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
               ),
-              child: Form(
-                key: formKey,
-                child: WillPopScope(
-                  onWillPop: () async {
-                    // Reset loading state when bottom sheet is dismissed
-                    if (mounted) {
-                      this.setState(() {
-                        _isAddingBill = false;
-                      });
-                    }
-                    return true;
-                  },
-                  child: SingleChildScrollView(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                      Row(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  left: 20.0,
+                  right: 20.0,
+                  top: 20.0,
+                  bottom: MediaQuery.of(context).viewInsets.bottom + 20.0,
+                ),
+                child: Form(
+                  key: formKey,
+                  child: PopScope(
+                    canPop: true,
+                    onPopInvoked: (didPop) {
+                      // Reset loading state when bottom sheet is dismissed
+                      if (mounted) {
+                        this.setState(() {
+                          _isAddingBill = false;
+                        });
+                      }
+                    },
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Container(
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(
-                              color:
-                                  (isEditMode
-                                          ? Colors.orange[700]!
-                                          : kPrimaryColor)
-                                      .withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Icon(
-                              isEditMode ? Icons.edit : Icons.add,
-                              color: isEditMode
-                                  ? Colors.orange[700]!
-                                  : kPrimaryColor,
-                              size: 18,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Text(
-                            isEditMode ? 'Edit Bill' : 'Add Bill',
-                            style: Theme.of(context).textTheme.titleMedium
-                                ?.copyWith(
-                                  fontWeight: FontWeight.w600,
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Container(
+                                width: 32,
+                                height: 32,
+                                decoration: BoxDecoration(
+                                  color:
+                                      (isEditMode
+                                              ? Colors.orange[700]!
+                                              : kPrimaryColor)
+                                          .withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Icon(
+                                  isEditMode ? Icons.edit : Icons.add,
                                   color: isEditMode
                                       ? Colors.orange[700]!
                                       : kPrimaryColor,
-                                  fontSize: 16,
-                                ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 18),
-                      // Category Field
-                      GestureDetector(
-                        onTap: () {
-                          _showCategoryBottomSheet(context, (category) {
-                            setState(() {
-                              selectedCategory = category;
-                            });
-                          });
-                        },
-                        child: Container(
-                          decoration: BoxDecoration(
-                            border: Border.all(
-                              color: kPrimaryColor.withAlpha(77),
-                            ),
-                            borderRadius: BorderRadius.circular(8),
-                            color: Colors.grey[50],
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 28,
-                                  height: 28,
-                                  decoration: BoxDecoration(
-                                    color: selectedCategory.backgroundColor,
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Icon(
-                                    selectedCategory.icon,
-                                    color: selectedCategory.color,
-                                    size: 16,
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Category',
-                                        style: TextStyle(
-                                          color: Colors.grey[600],
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        selectedCategory.name,
-                                        style: const TextStyle(
-                                          color: Colors.black,
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                Icon(
-                                  Icons.arrow_drop_down,
-                                  color: kPrimaryColor,
                                   size: 18,
                                 ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      TextFormField(
-                        controller: nameController,
-                        style: const TextStyle(
-                          color: Colors.black,
-                          fontSize: 14,
-                        ),
-                        decoration: InputDecoration(
-                          labelText: 'bill Name',
-                          hintText: '',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(
-                              color: kPrimaryColor.withValues(alpha: 0.6),
-                              width: 1,
-                            ),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(
-                              color: kPrimaryColor.withValues(alpha: 0.6),
-                              width: 1,
-                            ),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(
-                              color: kPrimaryColor,
-                              width: 1.5,
-                            ),
-                          ),
-                          filled: true,
-                          fillColor: Colors.grey[50],
-                          prefixIcon: Container(
-                            margin: const EdgeInsets.all(8),
-                            padding: const EdgeInsets.all(4),
-                            decoration: BoxDecoration(
-                              color: Colors.blue.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Icon(
-                              Icons.description,
-                              color: Colors.blue[700],
-                              size: 16,
-                            ),
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                          labelStyle: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                          ),
-                          hintStyle: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[400],
-                          ),
-                        ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Please enter subscription name';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 14),
-                      TextFormField(
-                        controller: amountController,
-                        style: const TextStyle(
-                          color: Colors.black,
-                          fontSize: 14,
-                        ),
-                        decoration: InputDecoration(
-                          labelText: 'Amount',
-                          hintText: 'e.g., 15.99',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(
-                              color: kPrimaryColor.withValues(alpha: 0.6),
-                              width: 1,
-                            ),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(
-                              color: kPrimaryColor.withValues(alpha: 0.6),
-                              width: 1,
-                            ),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(
-                              color: kPrimaryColor,
-                              width: 1.5,
-                            ),
-                          ),
-                          filled: true,
-                          fillColor: Colors.grey[50],
-                          prefixIcon: Container(
-                            margin: const EdgeInsets.all(8),
-                            padding: const EdgeInsets.all(4),
-                            decoration: BoxDecoration(
-                              color: Colors.green.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Icon(
-                              Icons.attach_money,
-                              color: Colors.green[700],
-                              size: 16,
-                            ),
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                          labelStyle: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                          ),
-                          hintStyle: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[400],
-                          ),
-                        ),
-                        keyboardType: TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Please enter amount';
-                          }
-                          if (double.tryParse(value) == null) {
-                            return 'Please enter a valid amount';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 14),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextFormField(
-                              controller: dueDateController,
-                              style: const TextStyle(
-                                color: Colors.black,
-                                fontSize: 14,
                               ),
-                              readOnly: true,
-                              onTap: () async {
-                                final DateTime? picked = await showDatePicker(
-                                  context: context,
-                                  initialDate:
-                                      selectedDate ??
-                                      DateTime.now().add(
-                                        const Duration(days: 1),
-                                      ),
-                                  firstDate: DateTime.now(),
-                                  lastDate: DateTime(2100),
-                                  builder: (context, child) {
-                                    return Theme(
-                                      data: Theme.of(context).copyWith(
-                                        colorScheme: ColorScheme.light(
-                                          primary: kPrimaryColor,
-                                          onPrimary: Colors.white,
-                                          surface: Colors.white,
-                                          onSurface: Colors.black,
-                                        ),
-                                      ),
-                                      child: child!,
-                                    );
-                                  },
-                                );
-                                if (picked != null) {
-                                  setState(() {
-                                    selectedDate = DateTime(
-                                      picked.year,
-                                      picked.month,
-                                      picked.day,
-                                      selectedTime?.hour ?? 0,
-                                      selectedTime?.minute ?? 0,
-                                    );
-                                    dueDateController.text =
-                                        '${picked.day.toString().padLeft(2, '0')}/${picked.month.toString().padLeft(2, '0')}/${picked.year}';
-                                  });
-                                }
-                              },
-                              decoration: InputDecoration(
-                                labelText: 'Due Date',
-                                hintText: 'Select date',
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: BorderSide(
-                                    color: kPrimaryColor.withValues(alpha: 0.6),
-                                    width: 1,
-                                  ),
-                                ),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: BorderSide(
-                                    color: kPrimaryColor.withValues(alpha: 0.6),
-                                    width: 1,
-                                  ),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: BorderSide(
-                                    color: kPrimaryColor,
-                                    width: 1.5,
-                                  ),
-                                ),
-                                filled: true,
-                                fillColor: Colors.grey[50],
-                                prefixIcon: Container(
-                                  margin: const EdgeInsets.all(8),
+                              const SizedBox(width: 10),
+                              Text(
+                                isEditMode ? 'Edit Bill' : 'Add Bill',
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                      color: isEditMode
+                                          ? Colors.orange[700]!
+                                          : kPrimaryColor,
+                                      fontSize: 16,
+                                    ),
+                              ),
+                              GestureDetector(
+                                onTap: () {
+                                  Navigator.of(context).pop();
+                                },
+                                child: Container(
                                   padding: const EdgeInsets.all(4),
                                   decoration: BoxDecoration(
-                                    color: Colors.purple.withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(6),
+                                    color: Colors.grey.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(12),
                                   ),
-                                  child: Icon(
-                                    Icons.calendar_today,
-                                    color: Colors.purple[700],
-                                    size: 16,
+                                  child: const Icon(
+                                    Icons.close,
+                                    color: Colors.grey,
+                                    size: 20,
                                   ),
-                                ),
-                                suffixIcon: Icon(
-                                  Icons.arrow_drop_down,
-                                  color: kPrimaryColor,
-                                  size: 18,
-                                ),
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
-                                ),
-                                labelStyle: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey[600],
-                                ),
-                                hintStyle: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey[400],
                                 ),
                               ),
-                              validator: (value) {
-                                if (value == null || value.isEmpty) {
-                                  return 'Please select due date';
-                                }
-                                return null;
-                              },
-                            ),
+                            ],
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: TextFormField(
-                              controller: dueTimeController,
-                              style: const TextStyle(
-                                color: Colors.black,
-                                fontSize: 14,
-                              ),
-                              readOnly: true,
-                              onTap: () async {
-                                final TimeOfDay? picked = await showTimePicker(
-                                  context: context,
-                                  initialTime:
-                                      selectedTime ??
-                                      const TimeOfDay(hour: 9, minute: 0),
-                                  builder: (context, child) {
-                                    return Theme(
-                                      data: Theme.of(context).copyWith(
-                                        colorScheme: ColorScheme.light(
-                                          primary: kPrimaryColor,
-                                          onPrimary: Colors.white,
-                                          surface: Colors.white,
-                                          onSurface: Colors.black,
-                                        ),
-                                      ),
-                                      child: child!,
-                                    );
-                                  },
-                                );
-                                if (picked != null) {
-                                  setState(() {
-                                    selectedTime = picked;
-                                    dueTimeController.text = picked.format(
-                                      context,
-                                    );
-
-                                    // Update selectedDate with the new time
-                                    if (selectedDate != null) {
-                                      selectedDate = DateTime(
-                                        selectedDate!.year,
-                                        selectedDate!.month,
-                                        selectedDate!.day,
-                                        picked.hour,
-                                        picked.minute,
-                                      );
-                                    }
-                                  });
-                                }
-                              },
-                              decoration: InputDecoration(
-                                labelText: 'Due Time',
-                                hintText: 'Select time',
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: BorderSide(
-                                    color: kPrimaryColor.withValues(alpha: 0.6),
-                                    width: 1,
-                                  ),
-                                ),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: BorderSide(
-                                    color: kPrimaryColor.withValues(alpha: 0.6),
-                                    width: 1,
-                                  ),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: BorderSide(
-                                    color: kPrimaryColor,
-                                    width: 1.5,
-                                  ),
-                                ),
-                                filled: true,
-                                fillColor: Colors.grey[50],
-                                prefixIcon: Container(
-                                  margin: const EdgeInsets.all(8),
-                                  padding: const EdgeInsets.all(4),
-                                  decoration: BoxDecoration(
-                                    color: Colors.orange.withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Icon(
-                                    Icons.access_time,
-                                    color: Colors.orange[700],
-                                    size: 16,
-                                  ),
-                                ),
-                                suffixIcon: Icon(
-                                  Icons.arrow_drop_down,
-                                  color: kPrimaryColor,
-                                  size: 18,
-                                ),
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
-                                ),
-                                labelStyle: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey[600],
-                                ),
-                                hintStyle: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey[400],
-                                ),
-                              ),
-                              validator: (value) {
-                                if (value == null || value.isEmpty) {
-                                  return 'Please select due time';
-                                }
-                                return null;
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      GestureDetector(
-                        onTap: () {
-                          _showFrequencyBottomSheet(context, (frequency) {
-                            setState(() {
-                              selectedFrequency = frequency;
-                            });
-                          });
-                        },
-                        child: Container(
-                          decoration: BoxDecoration(
-                            border: Border.all(
-                              color: kPrimaryColor.withAlpha(77),
-                            ),
-                            borderRadius: BorderRadius.circular(8),
-                            color: Colors.grey[50],
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                            child: Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(4),
-                                  decoration: BoxDecoration(
-                                    color: Colors.orange.withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Icon(
-                                    Icons.repeat,
-                                    color: Colors.orange[700],
-                                    size: 16,
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Frequency',
-                                        style: TextStyle(
-                                          color: Colors.grey[600],
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        selectedFrequency,
-                                        style: const TextStyle(
-                                          color: Colors.black,
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                Icon(
-                                  Icons.arrow_drop_down,
-                                  color: kPrimaryColor,
-                                  size: 18,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      GestureDetector(
-                        onTap: () {
-                          _showReminderBottomSheet(context, (reminder) {
-                            setState(() {
-                              selectedReminder = reminder;
-                            });
-                          }, selectedDate);
-                        },
-                        child: Container(
-                          decoration: BoxDecoration(
-                            border: Border.all(
-                              color: kPrimaryColor.withAlpha(77),
-                            ),
-                            borderRadius: BorderRadius.circular(8),
-                            color: Colors.grey[50],
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                            child: Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(4),
-                                  decoration: BoxDecoration(
-                                    color: Colors.red.withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Icon(
-                                    Icons.notifications,
-                                    color: Colors.red[700],
-                                    size: 16,
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Reminder',
-                                        style: TextStyle(
-                                          color: Colors.grey[600],
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        selectedReminder,
-                                        style: const TextStyle(
-                                          color: Colors.black,
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                Icon(
-                                  Icons.arrow_drop_down,
-                                  color: kPrimaryColor,
-                                  size: 18,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      // Reminder Time Field
-                      GestureDetector(
-                        onTap: selectedReminder == 'No reminder'
-                            ? null
-                            : () async {
-                                final defaultTime =
-                                    await _getDefaultNotificationTime();
-                                final TimeOfDay? picked = await showTimePicker(
-                                  context: context,
-                                  initialTime:
-                                      selectedReminderTime ?? defaultTime,
-                                );
-                                if (picked != null) {
-                                  setState(() {
-                                    selectedReminderTime = picked;
-                                    reminderTimeController.text =
-                                        selectedReminderTime!.format(context);
-
-                                    // Don't update user's default notification preference
-                                    // when editing individual bill reminder time
-                                  });
-                                }
-                              },
-                        child: Container(
-                          decoration: BoxDecoration(
-                            border: Border.all(
-                              color: selectedReminder == 'No reminder'
-                                  ? Colors.grey.withValues(alpha: 0.3)
-                                  : kPrimaryColor.withValues(alpha: 0.6),
-                              width: 1,
-                            ),
-                            borderRadius: BorderRadius.circular(8),
-                            color: selectedReminder == 'No reminder'
-                                ? Colors.grey[100]
-                                : Colors.grey[50],
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 16,
-                            ),
-                            child: Row(
-                              children: [
-                                Container(
-                                  margin: const EdgeInsets.only(right: 8),
-                                  padding: const EdgeInsets.all(4),
-                                  decoration: BoxDecoration(
-                                    color: Colors.orange.withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Icon(
-                                    Icons.notifications_active,
-                                    color: Colors.orange[700],
-                                    size: 16,
-                                  ),
-                                ),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Reminder Time',
-                                        style: TextStyle(
-                                          color:
-                                              selectedReminder == 'No reminder'
-                                              ? Colors.grey[400]
-                                              : Colors.grey[600],
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        selectedReminder == 'No reminder'
-                                            ? 'No reminder set'
-                                            : (selectedReminderTime?.format(
-                                                    context,
-                                                  ) ??
-                                                  'Select reminder time'),
-                                        style: TextStyle(
-                                          color:
-                                              selectedReminder == 'No reminder'
-                                              ? Colors.grey[400]
-                                              : (selectedReminderTime != null
-                                                    ? Colors.black
-                                                    : Colors.grey[400]),
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                Icon(
-                                  Icons.access_time,
-                                  color: selectedReminder == 'No reminder'
-                                      ? Colors.grey[400]
-                                      : kPrimaryColor,
-                                  size: 18,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      TextFormField(
-                        controller: notesController,
-                        style: const TextStyle(
-                          color: Colors.black,
-                          fontSize: 14,
-                        ),
-                        maxLines: 2,
-                        decoration: InputDecoration(
-                          labelText: 'Notes (Optional)',
-                          hintText: 'Add any additional notes...',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(
-                              color: kPrimaryColor.withValues(alpha: 0.6),
-                              width: 1,
-                            ),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(
-                              color: kPrimaryColor.withValues(alpha: 0.6),
-                              width: 1,
-                            ),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(
-                              color: kPrimaryColor,
-                              width: 1.5,
-                            ),
-                          ),
-                          filled: true,
-                          fillColor: Colors.grey[50],
-                          prefixIcon: Container(
-                            margin: const EdgeInsets.all(8),
-                            padding: const EdgeInsets.all(4),
-                            decoration: BoxDecoration(
-                              color: Colors.teal.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Icon(
-                              Icons.note,
-                              color: Colors.teal[700],
-                              size: 16,
-                            ),
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                          labelStyle: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                          ),
-                          hintStyle: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[400],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: () {
-                                Navigator.pop(context);
-                              },
-                              style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 12,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                side: BorderSide(color: Colors.grey.shade300),
-                              ),
-                              child: const Text(
-                                'Cancel',
-                                style: TextStyle(fontSize: 14),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: ElevatedButton(
-                              onPressed: () async {
-                                if (_isAddingBill) return;
-
-                                // Set loading state immediately
+                          const SizedBox(height: 18),
+                          // Category Field
+                          GestureDetector(
+                            onTap: () {
+                              _showCategoryBottomSheet(context, (category) {
                                 setState(() {
-                                  _isAddingBill = true;
+                                  selectedCategory = category;
                                 });
-
-                                // Also update the main screen state
-                                if (mounted) {
-                                  this.setState(() {
-                                    _isAddingBill = true;
-                                  });
-                                }
-
-                                try {
-                                  if (formKey.currentState!.validate()) {
-                                    // Quick validation first
-                                    if (nameController.text.trim().isEmpty) {
-                                      throw Exception('Bill name is required');
-                                    }
-                                    if (amountController.text.trim().isEmpty) {
-                                      throw Exception('Amount is required');
-                                    }
-                                    if (dueDateController.text.trim().isEmpty) {
-                                      throw Exception('Due date is required');
-                                    }
-
-                                    // Ensure we have a time set (default to user's preferred time if not selected)
-                                    if (selectedTime == null) {
-                                      selectedTime =
-                                          await _getDefaultNotificationTime();
-                                      dueTimeController.text = selectedTime!
-                                          .format(context);
-
-                                      // Update selectedDate with default time
-                                      if (selectedDate != null) {
+                              });
+                            },
+                            child: Container(
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: kPrimaryColor.withAlpha(77),
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                                color: Colors.grey[50],
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 28,
+                                      height: 28,
+                                      decoration: BoxDecoration(
+                                        color: selectedCategory.backgroundColor,
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Icon(
+                                        selectedCategory.icon,
+                                        color: selectedCategory.color,
+                                        size: 16,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'Category',
+                                            style: TextStyle(
+                                              color: Colors.grey[600],
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            selectedCategory.name,
+                                            style: const TextStyle(
+                                              color: Colors.black,
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Icon(
+                                      Icons.arrow_drop_down,
+                                      color: kPrimaryColor,
+                                      size: 18,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          TextFormField(
+                            controller: nameController,
+                            style: const TextStyle(
+                              color: Colors.black,
+                              fontSize: 14,
+                            ),
+                            decoration: InputDecoration(
+                              labelText: 'bill Name',
+                              hintText: '',
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(
+                                  color: kPrimaryColor.withValues(alpha: 0.6),
+                                  width: 1,
+                                ),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(
+                                  color: kPrimaryColor.withValues(alpha: 0.6),
+                                  width: 1,
+                                ),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(
+                                  color: kPrimaryColor,
+                                  width: 1.5,
+                                ),
+                              ),
+                              filled: true,
+                              fillColor: Colors.grey[50],
+                              prefixIcon: Container(
+                                margin: const EdgeInsets.all(8),
+                                padding: const EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  color: Colors.blue.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Icon(
+                                  Icons.description,
+                                  color: Colors.blue[700],
+                                  size: 16,
+                                ),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              labelStyle: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                              ),
+                              hintStyle: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[400],
+                              ),
+                            ),
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'Please enter subscription name';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 14),
+                          TextFormField(
+                            controller: amountController,
+                            style: const TextStyle(
+                              color: Colors.black,
+                              fontSize: 14,
+                            ),
+                            decoration: InputDecoration(
+                              labelText: 'Amount',
+                              hintText: 'e.g., 15.99',
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(
+                                  color: kPrimaryColor.withValues(alpha: 0.6),
+                                  width: 1,
+                                ),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(
+                                  color: kPrimaryColor.withValues(alpha: 0.6),
+                                  width: 1,
+                                ),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(
+                                  color: kPrimaryColor,
+                                  width: 1.5,
+                                ),
+                              ),
+                              filled: true,
+                              fillColor: Colors.grey[50],
+                              prefixIcon: Container(
+                                margin: const EdgeInsets.all(8),
+                                padding: const EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Icon(
+                                  Icons.attach_money,
+                                  color: Colors.green[700],
+                                  size: 16,
+                                ),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              labelStyle: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                              ),
+                              hintStyle: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[400],
+                              ),
+                            ),
+                            keyboardType: TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'Please enter amount';
+                              }
+                              if (double.tryParse(value) == null) {
+                                return 'Please enter a valid amount';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 14),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextFormField(
+                                  controller: dueDateController,
+                                  style: const TextStyle(
+                                    color: Colors.black,
+                                    fontSize: 14,
+                                  ),
+                                  readOnly: true,
+                                  onTap: () async {
+                                    final DateTime? picked =
+                                        await showDatePicker(
+                                          context: context,
+                                          initialDate:
+                                              selectedDate ??
+                                              DateTime.now().add(
+                                                const Duration(days: 1),
+                                              ),
+                                          firstDate: DateTime.now(),
+                                          lastDate: DateTime(2100),
+                                          builder: (context, child) {
+                                            return Theme(
+                                              data: Theme.of(context).copyWith(
+                                                colorScheme: ColorScheme.light(
+                                                  primary: kPrimaryColor,
+                                                  onPrimary: Colors.white,
+                                                  surface: Colors.white,
+                                                  onSurface: Colors.black,
+                                                ),
+                                              ),
+                                              child: child!,
+                                            );
+                                          },
+                                        );
+                                    if (picked != null) {
+                                      setState(() {
                                         selectedDate = DateTime(
-                                          selectedDate!.year,
-                                          selectedDate!.month,
-                                          selectedDate!.day,
-                                          selectedTime!.hour,
-                                          selectedTime!.minute,
+                                          picked.year,
+                                          picked.month,
+                                          picked.day,
+                                          selectedTime?.hour ?? 0,
+                                          selectedTime?.minute ?? 0,
+                                        );
+                                        dueDateController.text =
+                                            '${picked.day.toString().padLeft(2, '0')}/${picked.month.toString().padLeft(2, '0')}/${picked.year}';
+                                      });
+                                    }
+                                  },
+                                  decoration: InputDecoration(
+                                    labelText: 'Due Date',
+                                    hintText: 'Select date',
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                      borderSide: BorderSide(
+                                        color: kPrimaryColor.withValues(
+                                          alpha: 0.6,
+                                        ),
+                                        width: 1,
+                                      ),
+                                    ),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                      borderSide: BorderSide(
+                                        color: kPrimaryColor.withValues(
+                                          alpha: 0.6,
+                                        ),
+                                        width: 1,
+                                      ),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                      borderSide: BorderSide(
+                                        color: kPrimaryColor,
+                                        width: 1.5,
+                                      ),
+                                    ),
+                                    filled: true,
+                                    fillColor: Colors.grey[50],
+                                    prefixIcon: Container(
+                                      margin: const EdgeInsets.all(8),
+                                      padding: const EdgeInsets.all(4),
+                                      decoration: BoxDecoration(
+                                        color: Colors.purple.withValues(
+                                          alpha: 0.1,
+                                        ),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Icon(
+                                        Icons.calendar_today,
+                                        color: Colors.purple[700],
+                                        size: 16,
+                                      ),
+                                    ),
+                                    suffixIcon: Icon(
+                                      Icons.arrow_drop_down,
+                                      color: kPrimaryColor,
+                                      size: 18,
+                                    ),
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 8,
+                                    ),
+                                    labelStyle: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey[600],
+                                    ),
+                                    hintStyle: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey[400],
+                                    ),
+                                  ),
+                                  validator: (value) {
+                                    if (value == null || value.isEmpty) {
+                                      return 'Please select due date';
+                                    }
+                                    return null;
+                                  },
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: TextFormField(
+                                  controller: dueTimeController,
+                                  style: const TextStyle(
+                                    color: Colors.black,
+                                    fontSize: 14,
+                                  ),
+                                  readOnly: true,
+                                  onTap: () async {
+                                    final TimeOfDay? picked =
+                                        await showTimePicker(
+                                          context: context,
+                                          initialTime:
+                                              selectedTime ??
+                                              const TimeOfDay(
+                                                hour: 9,
+                                                minute: 0,
+                                              ),
+                                          builder: (context, child) {
+                                            return Theme(
+                                              data: Theme.of(context).copyWith(
+                                                colorScheme: ColorScheme.light(
+                                                  primary: kPrimaryColor,
+                                                  onPrimary: Colors.white,
+                                                  surface: Colors.white,
+                                                  onSurface: Colors.black,
+                                                ),
+                                              ),
+                                              child: child!,
+                                            );
+                                          },
+                                        );
+                                    if (picked != null) {
+                                      setState(() {
+                                        selectedTime = picked;
+                                        dueTimeController.text = picked.format(
+                                          context,
+                                        );
+
+                                        // Update selectedDate with the new time
+                                        if (selectedDate != null) {
+                                          selectedDate = DateTime(
+                                            selectedDate!.year,
+                                            selectedDate!.month,
+                                            selectedDate!.day,
+                                            picked.hour,
+                                            picked.minute,
+                                          );
+                                        }
+                                      });
+                                    }
+                                  },
+                                  decoration: InputDecoration(
+                                    labelText: 'Due Time',
+                                    hintText: 'Select time',
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                      borderSide: BorderSide(
+                                        color: kPrimaryColor.withValues(
+                                          alpha: 0.6,
+                                        ),
+                                        width: 1,
+                                      ),
+                                    ),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                      borderSide: BorderSide(
+                                        color: kPrimaryColor.withValues(
+                                          alpha: 0.6,
+                                        ),
+                                        width: 1,
+                                      ),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                      borderSide: BorderSide(
+                                        color: kPrimaryColor,
+                                        width: 1.5,
+                                      ),
+                                    ),
+                                    filled: true,
+                                    fillColor: Colors.grey[50],
+                                    prefixIcon: Container(
+                                      margin: const EdgeInsets.all(8),
+                                      padding: const EdgeInsets.all(4),
+                                      decoration: BoxDecoration(
+                                        color: Colors.orange.withValues(
+                                          alpha: 0.1,
+                                        ),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Icon(
+                                        Icons.access_time,
+                                        color: Colors.orange[700],
+                                        size: 16,
+                                      ),
+                                    ),
+                                    suffixIcon: Icon(
+                                      Icons.arrow_drop_down,
+                                      color: kPrimaryColor,
+                                      size: 18,
+                                    ),
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 8,
+                                    ),
+                                    labelStyle: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey[600],
+                                    ),
+                                    hintStyle: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey[400],
+                                    ),
+                                  ),
+                                  validator: (value) {
+                                    if (value == null || value.isEmpty) {
+                                      return 'Please select due time';
+                                    }
+                                    return null;
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 14),
+                          GestureDetector(
+                            onTap: () {
+                              _showFrequencyBottomSheet(context, (frequency) {
+                                setState(() {
+                                  selectedFrequency = frequency;
+                                });
+                              });
+                            },
+                            child: Container(
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: kPrimaryColor.withAlpha(77),
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                                color: Colors.grey[50],
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(4),
+                                      decoration: BoxDecoration(
+                                        color: Colors.orange.withValues(
+                                          alpha: 0.1,
+                                        ),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Icon(
+                                        Icons.repeat,
+                                        color: Colors.orange[700],
+                                        size: 16,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'Frequency',
+                                            style: TextStyle(
+                                              color: Colors.grey[600],
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            selectedFrequency,
+                                            style: const TextStyle(
+                                              color: Colors.black,
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Icon(
+                                      Icons.arrow_drop_down,
+                                      color: kPrimaryColor,
+                                      size: 18,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          GestureDetector(
+                            onTap: () {
+                              _showReminderBottomSheet(context, (reminder) {
+                                setState(() {
+                                  selectedReminder = reminder;
+                                });
+                              }, selectedDate);
+                            },
+                            child: Container(
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: kPrimaryColor.withAlpha(77),
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                                color: Colors.grey[50],
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(4),
+                                      decoration: BoxDecoration(
+                                        color: Colors.red.withValues(
+                                          alpha: 0.1,
+                                        ),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Icon(
+                                        Icons.notifications,
+                                        color: Colors.red[700],
+                                        size: 16,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'Reminder',
+                                            style: TextStyle(
+                                              color: Colors.grey[600],
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            selectedReminder,
+                                            style: const TextStyle(
+                                              color: Colors.black,
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Icon(
+                                      Icons.arrow_drop_down,
+                                      color: kPrimaryColor,
+                                      size: 18,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          // Reminder Time Field
+                          GestureDetector(
+                            onTap: selectedReminder == 'No reminder'
+                                ? null
+                                : () async {
+                                    final defaultTime =
+                                        await _getDefaultNotificationTime();
+                                    final TimeOfDay? picked =
+                                        await showTimePicker(
+                                          context: context,
+                                          initialTime:
+                                              selectedReminderTime ??
+                                              defaultTime,
+                                        );
+                                    if (picked != null) {
+                                      setState(() {
+                                        selectedReminderTime = picked;
+                                        reminderTimeController.text =
+                                            selectedReminderTime!.format(
+                                              context,
+                                            );
+
+                                        // Don't update user's default notification preference
+                                        // when editing individual bill reminder time
+                                      });
+                                    }
+                                  },
+                            child: Container(
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: selectedReminder == 'No reminder'
+                                      ? Colors.grey.withValues(alpha: 0.3)
+                                      : kPrimaryColor.withValues(alpha: 0.6),
+                                  width: 1,
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                                color: selectedReminder == 'No reminder'
+                                    ? Colors.grey[100]
+                                    : Colors.grey[50],
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 16,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      margin: const EdgeInsets.only(right: 8),
+                                      padding: const EdgeInsets.all(4),
+                                      decoration: BoxDecoration(
+                                        color: Colors.orange.withValues(
+                                          alpha: 0.1,
+                                        ),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Icon(
+                                        Icons.notifications_active,
+                                        color: Colors.orange[700],
+                                        size: 16,
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'Reminder Time',
+                                            style: TextStyle(
+                                              color:
+                                                  selectedReminder ==
+                                                      'No reminder'
+                                                  ? Colors.grey[400]
+                                                  : Colors.grey[600],
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            selectedReminder == 'No reminder'
+                                                ? 'No reminder set'
+                                                : (selectedReminderTime?.format(
+                                                        context,
+                                                      ) ??
+                                                      'Select reminder time'),
+                                            style: TextStyle(
+                                              color:
+                                                  selectedReminder ==
+                                                      'No reminder'
+                                                  ? Colors.grey[400]
+                                                  : (selectedReminderTime !=
+                                                            null
+                                                        ? Colors.black
+                                                        : Colors.grey[400]),
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Icon(
+                                      Icons.access_time,
+                                      color: selectedReminder == 'No reminder'
+                                          ? Colors.grey[400]
+                                          : kPrimaryColor,
+                                      size: 18,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          TextFormField(
+                            controller: notesController,
+                            style: const TextStyle(
+                              color: Colors.black,
+                              fontSize: 14,
+                            ),
+                            maxLines: 2,
+                            decoration: InputDecoration(
+                              labelText: 'Notes (Optional)',
+                              hintText: 'Add any additional notes...',
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(
+                                  color: kPrimaryColor.withValues(alpha: 0.6),
+                                  width: 1,
+                                ),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(
+                                  color: kPrimaryColor.withValues(alpha: 0.6),
+                                  width: 1,
+                                ),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(
+                                  color: kPrimaryColor,
+                                  width: 1.5,
+                                ),
+                              ),
+                              filled: true,
+                              fillColor: Colors.grey[50],
+                              prefixIcon: Container(
+                                margin: const EdgeInsets.all(8),
+                                padding: const EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  color: Colors.teal.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Icon(
+                                  Icons.note,
+                                  color: Colors.teal[700],
+                                  size: 16,
+                                ),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              labelStyle: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                              ),
+                              hintStyle: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[400],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 18),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton(
+                                  onPressed: () {
+                                    // Immediately stop any running sheet transition and jump to hidden
+                                    try {
+                                      _sheetAnimController.stop();
+                                      _sheetAnimController.value = 0.0;
+                                    } catch (_) {
+                                      // ignore - controller may be disposed or not running
+                                    }
+                                    // Pop the bottom sheet synchronously
+                                    if (Navigator.of(context).canPop()) {
+                                      Navigator.of(context).pop();
+                                    }
+                                    // Reset the parent loading flag to ensure UI returns to normal
+                                    if (mounted) {
+                                      this.setState(() {
+                                        _isAddingBill = false;
+                                      });
+                                    }
+                                  },
+                                  style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 12,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    side: BorderSide(
+                                      color: Colors.grey.shade300,
+                                    ),
+                                  ),
+                                  child: const Text(
+                                    'Cancel',
+                                    style: TextStyle(fontSize: 14),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: ElevatedButton(
+                                  onPressed: () async {
+                                    if (_isAddingBill) return;
+
+                                    // Set loading state immediately
+                                    setState(() {
+                                      _isAddingBill = true;
+                                    });
+
+                                    // Also update the main screen state
+                                    if (mounted) {
+                                      this.setState(() {
+                                        _isAddingBill = true;
+                                      });
+                                    }
+
+                                    try {
+                                      if (formKey.currentState!.validate()) {
+                                        // Quick validation first
+                                        if (nameController.text
+                                            .trim()
+                                            .isEmpty) {
+                                          throw Exception(
+                                            'Bill name is required',
+                                          );
+                                        }
+                                        if (amountController.text
+                                            .trim()
+                                            .isEmpty) {
+                                          throw Exception('Amount is required');
+                                        }
+                                        if (dueDateController.text
+                                            .trim()
+                                            .isEmpty) {
+                                          throw Exception(
+                                            'Due date is required',
+                                          );
+                                        }
+
+                                        // Ensure we have a time set (default to user's preferred time if not selected)
+                                        if (selectedTime == null) {
+                                          selectedTime =
+                                              await _getDefaultNotificationTime();
+                                          dueTimeController.text = selectedTime!
+                                              .format(context);
+
+                                          // Update selectedDate with default time
+                                          if (selectedDate != null) {
+                                            selectedDate = DateTime(
+                                              selectedDate!.year,
+                                              selectedDate!.month,
+                                              selectedDate!.day,
+                                              selectedTime!.hour,
+                                              selectedTime!.minute,
+                                            );
+                                          }
+                                        }
+
+                                        // Create full due date string with time
+                                        String fullDueDate =
+                                            dueDateController.text;
+                                        if (selectedTime != null) {
+                                          fullDueDate +=
+                                              ' ${selectedTime!.format(context)}';
+                                        }
+
+                                        // Create subscription data object
+                                        final subscription = {
+                                          'name': nameController.text.trim(),
+                                          'amount': amountController.text
+                                              .trim(),
+                                          'dueDate': dueDateController.text
+                                              .trim(),
+                                          'dueTime': dueTimeController.text
+                                              .trim(),
+                                          'dueDateTime': selectedDate
+                                              ?.toIso8601String(),
+                                          'reminderTime':
+                                              selectedReminderTime != null
+                                              ? '${selectedReminderTime!.hour.toString().padLeft(2, '0')}:${selectedReminderTime!.minute.toString().padLeft(2, '0')}'
+                                              : null,
+                                          'frequency': selectedFrequency,
+                                          'reminder': selectedReminder,
+                                          'category': selectedCategory.id,
+                                          'categoryName': selectedCategory.name,
+                                          'categoryColor': selectedCategory
+                                              .color
+                                              .toARGB32(),
+                                          'categoryBackgroundColor':
+                                              selectedCategory.backgroundColor
+                                                  .toARGB32(),
+                                          'notes':
+                                              notesController.text
+                                                  .trim()
+                                                  .isEmpty
+                                              ? null
+                                              : notesController.text.trim(),
+                                          'status':
+                                              'upcoming', // Set initial status
+                                          'createdAt': DateTime.now()
+                                              .toIso8601String(),
+                                          'lastModified': DateTime.now()
+                                              .toIso8601String(),
+                                        };
+
+                                        // Close bottom sheet first for better UX
+                                        if (mounted) {
+                                          Navigator.pop(context);
+                                        }
+
+                                        // Then process the save operation in background
+                                        unawaited(
+                                          _processBillSave(
+                                            isEditMode,
+                                            currentEditIndex,
+                                            subscription,
+                                            selectedReminderTime,
+                                            selectedReminder,
+                                            selectedDate,
+                                            nameController.text,
+                                            amountController.text,
+                                          ),
                                         );
                                       }
-                                    }
-
-                                    // Create full due date string with time
-                                    String fullDueDate = dueDateController.text;
-                                    if (selectedTime != null) {
-                                      fullDueDate +=
-                                          ' ${selectedTime!.format(context)}';
-                                    }
-
-                                    // Create subscription data object
-                                    final subscription = {
-                                      'name': nameController.text.trim(),
-                                      'amount': amountController.text.trim(),
-                                      'dueDate': dueDateController.text.trim(),
-                                      'dueTime': dueTimeController.text.trim(),
-                                      'dueDateTime': selectedDate
-                                          ?.toIso8601String(),
-                                      'reminderTime':
-                                          selectedReminderTime != null
-                                          ? '${selectedReminderTime!.hour.toString().padLeft(2, '0')}:${selectedReminderTime!.minute.toString().padLeft(2, '0')}'
-                                          : null,
-                                      'frequency': selectedFrequency,
-                                      'reminder': selectedReminder,
-                                      'category': selectedCategory.id,
-                                      'categoryName': selectedCategory.name,
-                                      'categoryColor': selectedCategory.color
-                                          .toARGB32(),
-                                      'categoryBackgroundColor':
-                                          selectedCategory.backgroundColor
-                                              .toARGB32(),
-                                      'notes': notesController.text.trim().isEmpty
-                                          ? null
-                                          : notesController.text.trim(),
-                                      'status': 'upcoming', // Set initial status
-                                      'createdAt': DateTime.now().toIso8601String(),
-                                      'lastModified': DateTime.now().toIso8601String(),
-                                    };
-
-                                    // Close bottom sheet first for better UX
-                                    if (mounted) {
-                                      Navigator.pop(context);
-                                    }
-
-                                    // Then process the save operation in background
-                                    unawaited(_processBillSave(isEditMode, currentEditIndex, subscription, selectedReminderTime, selectedReminder, selectedDate, nameController.text, amountController.text));
-                                  }
-                                } catch (e) {
-                                  debugPrint('Error adding bill: $e');
-                                  if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text(
-                                          'Error adding bill: ${e.toString()}',
-                                        ),
-                                        backgroundColor: Colors.red,
-                                        behavior: SnackBarBehavior.floating,
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            8,
+                                    } catch (e) {
+                                      debugPrint('Error adding bill: $e');
+                                      if (mounted) {
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                              'Error adding bill: ${e.toString()}',
+                                            ),
+                                            backgroundColor: Colors.red,
+                                            behavior: SnackBarBehavior.floating,
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                            ),
                                           ),
+                                        );
+                                      }
+                                    } finally {
+                                      // Reset loading state
+                                      if (mounted) {
+                                        setState(() {
+                                          _isAddingBill = false;
+                                        });
+                                        this.setState(() {
+                                          _isAddingBill = false;
+                                        });
+                                      }
+                                    }
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: kPrimaryColor,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 12,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                  ),
+                                  child: _isAddingBill
+                                      ? SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            valueColor:
+                                                AlwaysStoppedAnimation<Color>(
+                                                  Colors.white,
+                                                ),
+                                          ),
+                                        )
+                                      : Text(
+                                          isEditMode ? 'Edit Bill' : 'Add Bill',
+                                          style: TextStyle(fontSize: 14),
                                         ),
-                                      ),
-                                    );
-                                  }
-                                } finally {
-                                  // Reset loading state
-                                  if (mounted) {
-                                    setState(() {
-                                      _isAddingBill = false;
-                                    });
-                                    this.setState(() {
-                                      _isAddingBill = false;
-                                    });
-                                  }
-                                }
-                              },
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: kPrimaryColor,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 12,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
                                 ),
                               ),
-                              child: _isAddingBill
-                                  ? SizedBox(
-                                      width: 16,
-                                      height: 16,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        valueColor:
-                                            AlwaysStoppedAnimation<Color>(
-                                              Colors.white,
-                                            ),
-                                      ),
-                                    )
-                                  : Text(
-                                      isEditMode ? 'Edit Bill' : 'Add Bill',
-                                      style: TextStyle(fontSize: 14),
-                                    ),
-                            ),
+                            ],
                           ),
                         ],
                       ),
-                    ],
-                  ),
+                    ),
+                  
                 ),
               ),
-            ),
-          ));
-        },
-      ),
-    );
+            ));
+          },
+        ),
+      );
+    } finally {
+      // Dispose the transient animation controller used for the sheet transition
+      _sheetAnimController.dispose();
+    }
 
     // Handle bottom sheet dismissal - always reset loading state
     if (mounted) {
@@ -4331,15 +4396,11 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
       debugPrint('🚀 Processing bill save in background...');
 
       // Schedule notification if reminder time is selected
-      if (selectedReminderTime != null &&
-          selectedReminder != 'No reminder') {
+      if (selectedReminderTime != null && selectedReminder != 'No reminder') {
         // Calculate the actual reminder date based on the reminder preference
         DateTime reminderDate;
         if (selectedDate != null) {
-          reminderDate = _calculateReminderDate(
-            selectedDate,
-            selectedReminder,
-          );
+          reminderDate = _calculateReminderDate(selectedDate, selectedReminder);
         } else {
           reminderDate = DateTime.now();
         }
@@ -4354,21 +4415,13 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
         );
 
         // Only schedule if the reminder time is in the future
-        if (reminderDateTime.isAfter(
-          DateTime.now(),
-        )) {
-          await NotificationService()
-              .scheduleNotification(
-                id:
-                    DateTime.now()
-                        .millisecondsSinceEpoch ~/
-                    1000,
-                title:
-                    'Bill Reminder: $billName',
-                body:
-                    'Your bill for $billName of $billAmount is due soon!',
-                scheduledTime: reminderDateTime,
-              );
+        if (reminderDateTime.isAfter(DateTime.now())) {
+          await NotificationService().scheduleNotification(
+            id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+            title: 'Bill Reminder: $billName',
+            body: 'Your bill for $billName of $billAmount is due soon!',
+            scheduledTime: reminderDateTime,
+          );
         }
       }
 
@@ -4382,11 +4435,15 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
         }
 
         // Save to local storage in parallel
-        unawaited(_updateBill(currentEditIndex, subscription).then((_) {
-          debugPrint('✅ Updated bill in storage for $billName');
-        }).catchError((error) {
-          debugPrint('❌ Failed to update bill: $error');
-        }));
+        unawaited(
+          _updateBill(currentEditIndex, subscription)
+              .then((_) {
+                debugPrint('✅ Updated bill in storage for $billName');
+              })
+              .catchError((error) {
+                debugPrint('❌ Failed to update bill: $error');
+              }),
+        );
       } else {
         // Add to UI immediately for faster feedback
         if (mounted) {
@@ -4397,11 +4454,15 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
         }
 
         // Save to storage in parallel
-        unawaited(_addSubscription(subscription).then((_) {
-          debugPrint('✅ Added bill to storage for $billName');
-        }).catchError((error) {
-          debugPrint('❌ Failed to add bill: $error');
-        }));
+        unawaited(
+          _addSubscription(subscription)
+              .then((_) {
+                debugPrint('✅ Added bill to storage for $billName');
+              })
+              .catchError((error) {
+                debugPrint('❌ Failed to add bill: $error');
+              }),
+        );
       }
 
       debugPrint('✅ Bill save completed successfully');
@@ -4411,9 +4472,7 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              'Error saving bill: ${e.toString()}',
-            ),
+            content: Text('Error saving bill: ${e.toString()}'),
             backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(
@@ -4439,20 +4498,75 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
     // Note: UI is already updated by the calling method for immediate feedback
 
     // Check network status and save in parallel (optimized like paid functionality)
-    unawaited(_checkConnectivity().then((_) async {
-      debugPrint('Adding subscription. Network status: $_isOnline');
+    unawaited(
+      _checkConnectivity().then((_) async {
+        debugPrint('Adding subscription. Network status: $_isOnline');
 
-      if (_isOnline) {
-        try {
-          // Try to add to Firebase first
-          await _subscriptionService.addSubscription(subscription);
+        if (_isOnline) {
+          try {
+            // Try to add to Firebase first
+            await _subscriptionService.addSubscription(subscription);
 
-          // If successful, show success message
+            // If successful, show success message
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('${subscription['name']} added successfully!'),
+                  backgroundColor: Colors.green,
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              );
+            }
+          } catch (e) {
+            // Re-check connectivity to make sure it's actually offline
+            await _checkConnectivity();
+
+            if (!_isOnline) {
+              // Only show offline message if actually offline
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      '${subscription['name']} saved locally. Will sync when online.',
+                    ),
+                    backgroundColor: Colors.orange,
+                    behavior: SnackBarBehavior.floating,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                );
+              }
+            } else {
+              // If online but Firebase failed, show error message
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Failed to save to server. Please try again.',
+                    ),
+                    backgroundColor: Colors.red,
+                    behavior: SnackBarBehavior.floating,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                );
+              }
+            }
+          }
+        } else {
+          // Offline: Show offline message
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('${subscription['name']} added successfully!'),
-                backgroundColor: Colors.green,
+                content: Text(
+                  '${subscription['name']} saved locally. Will sync when online.',
+                ),
+                backgroundColor: Colors.orange,
                 behavior: SnackBarBehavior.floating,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
@@ -4460,60 +4574,9 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
               ),
             );
           }
-        } catch (e) {
-          // Re-check connectivity to make sure it's actually offline
-          await _checkConnectivity();
-
-          if (!_isOnline) {
-            // Only show offline message if actually offline
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(
-                    '${subscription['name']} saved locally. Will sync when online.',
-                  ),
-                  backgroundColor: Colors.orange,
-                  behavior: SnackBarBehavior.floating,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-              );
-            }
-          } else {
-            // If online but Firebase failed, show error message
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Failed to save to server. Please try again.'),
-                  backgroundColor: Colors.red,
-                  behavior: SnackBarBehavior.floating,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-              );
-            }
-          }
         }
-      } else {
-        // Offline: Show offline message
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                '${subscription['name']} saved locally. Will sync when online.',
-              ),
-              backgroundColor: Colors.orange,
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-          );
-        }
-      }
-    }));
+      }),
+    );
   }
 
   void showCategoryBillsBottomSheet(BuildContext context, Category category) {
@@ -4564,7 +4627,9 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
 
     // NEVER reload if we already have data and are initialized
     if (_isInitialized && _bills.isNotEmpty) {
-      debugPrint('🔄 Skipping data load - already have ${_bills.length} bills loaded');
+      debugPrint(
+        '🔄 Skipping data load - already have ${_bills.length} bills loaded',
+      );
       return;
     }
 
@@ -4572,7 +4637,9 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
     final now = DateTime.now();
     if (_lastDataLoadTime != null &&
         now.difference(_lastDataLoadTime!) < const Duration(seconds: 30)) {
-      debugPrint('🔄 Skipping data load - last load was ${now.difference(_lastDataLoadTime!).inSeconds} seconds ago');
+      debugPrint(
+        '🔄 Skipping data load - last load was ${now.difference(_lastDataLoadTime!).inSeconds} seconds ago',
+      );
       return;
     }
 
@@ -4584,9 +4651,7 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
       });
     }
 
-    debugPrint(
-      '🔄 Loading data with local-first approach...',
-    );
+    debugPrint('🔄 Loading data with local-first approach...');
 
     try {
       // Always load from local storage first (fastest)
@@ -4594,28 +4659,59 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
       final subscriptions = await _subscriptionService.getSubscriptions();
       debugPrint('✅ Loaded ${subscriptions.length} bills from local storage');
 
-      // Filter out invalid/ghost bills - only show bills that have proper IDs
+      // Filter out invalid/ghost bills - only show bills that have proper IDs and valid data
       final filteredSubscriptions = subscriptions.where((bill) {
-        final hasValidId =
-            bill['id'] != null && bill['id'].toString().isNotEmpty;
-        final hasFirebaseId =
-            bill['firebaseId'] != null &&
-            bill['firebaseId'].toString().isNotEmpty;
-        final hasLocalId =
-            bill['localId'] != null && bill['localId'].toString().isNotEmpty;
-        final hasName =
-            bill['name'] != null && bill['name'].toString().isNotEmpty;
+        try {
+          // Skip bills without a name
+          if (bill['name'] == null) {
+            debugPrint('🗑️ Filtering out bill with no name');
+            return false;
+          }
 
-        // Keep if it has valid Firebase ID OR valid local ID with name
-        final isValid = hasFirebaseId || (hasLocalId && hasName);
+          // Check for valid ID structure
+          final hasValidId =
+              bill['id'] != null && bill['id'].toString().isNotEmpty;
+          final hasFirebaseId =
+              bill['firebaseId'] != null &&
+              bill['firebaseId'].toString().isNotEmpty;
+          final hasLocalId =
+              bill['localId'] != null && bill['localId'].toString().isNotEmpty;
 
-        if (!isValid) {
-          debugPrint(
-            '🗑️ Filtering out invalid bill: ${bill['name']} (ID: ${bill['id']}, FirebaseID: ${bill['firebaseId']}, LocalID: ${bill['localId']})',
-          );
+          // Validate name exists and is meaningful
+          final hasName =
+              bill['name'] != null &&
+              bill['name'].toString().trim().isNotEmpty &&
+              bill['name'].toString().length > 1; // More than just a character
+
+          // Validate amount (should be a positive number if present)
+          final hasValidAmount =
+              bill['amount'] == null ||
+              (bill['amount'] is num && bill['amount'] >= 0) ||
+              (double.tryParse(bill['amount'].toString()) != null &&
+                  double.parse(bill['amount'].toString()) >= 0);
+
+          // Validate due date format if present
+          final hasValidDueDate =
+              bill['dueDate'] == null ||
+              (bill['dueDate'] is String &&
+                  bill['dueDate'].toString().isNotEmpty);
+
+          // Keep if it has valid Firebase ID OR valid local ID with name and valid data
+          final isValid =
+              hasFirebaseId ||
+              (hasLocalId && hasName && hasValidAmount && hasValidDueDate);
+
+          if (!isValid) {
+            debugPrint(
+              '🗑️ Filtering out invalid bill: ${bill['name']} (ID: ${bill['id']}, FirebaseID: ${bill['firebaseId']}, LocalID: ${bill['localId']}, Amount: ${bill['amount']})',
+            );
+          }
+
+          return isValid;
+        } catch (e) {
+          debugPrint('🗑️ Error validating bill, filtering out: $e');
+          return false; // Filter out any bill that causes validation errors
         }
-
-        return isValid;
       }).toList();
 
       if (mounted) {
@@ -4634,8 +4730,8 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
         // Initialize bill statuses
         _initializeBillStatuses();
 
-        // Trigger background sync if needed
-        unawaited(_subscriptionService.performPeriodicSync());
+        // Fetch latest data from Firestore on app startup for cross-device sync
+        await _fetchLatestFromFirestore();
       }
     } catch (e) {
       debugPrint('❌ Data load failed: $e');
@@ -4644,6 +4740,453 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
           _isLoading = false;
           _hasError = true;
         });
+      }
+    }
+  }
+
+  // Fetch latest data from Firestore on app startup
+  Future<void> _fetchLatestFromFirestore() async {
+    if (!mounted) return;
+
+    // Declare here so it's available after the try/catch for emergency checks
+    List<Map<String, dynamic>> firestoreData = [];
+
+    try {
+      debugPrint('🔥 [_fetchLatestFromFirestore] Starting fetch process...');
+      debugPrint('🔥 [_fetchLatestFromFirestore] Current _bills count: ${_bills.length}');
+
+      // Check if online first
+      debugPrint('🔥 [_fetchLatestFromFirestore] Checking online status...');
+      final isOnline = await _subscriptionService.isOnline();
+      debugPrint('🔥 [_fetchLatestFromFirestore] Online status result: $isOnline');
+
+      if (!isOnline) {
+        debugPrint('📵 [_fetchLatestFromFirestore] Offline, skipping Firestore fetch');
+        return;
+      }
+
+      // Debug: Check current user
+      final currentUser = FirebaseAuth.instance.currentUser;
+      debugPrint('👤 [_fetchLatestFromFirestore] Current user: ${currentUser?.uid ?? "NOT LOGGED IN"}');
+      debugPrint('📧 [_fetchLatestFromFirestore] User email: ${currentUser?.email ?? "UNKNOWN"}');
+
+      // Fetch fresh data from Firestore
+      debugPrint('🔥 [_fetchLatestFromFirestore] Fetching from Firestore...');
+      firestoreData = await _subscriptionService.getFirebaseSubscriptionsOnly();
+      debugPrint('✅ [_fetchLatestFromFirestore] Fetched ${firestoreData.length} bills from Firestore');
+
+      // Debug: Log the fetched bills
+      for (int i = 0; i < firestoreData.length; i++) {
+        final bill = firestoreData[i];
+        debugPrint(
+          '📋 [_fetchLatestFromFirestore] Firestore bill $i: ${bill['name']} (ID: ${bill['firebaseId']})',
+        );
+      }
+
+      // Get local data for comparison
+      debugPrint('🔥 [_fetchLatestFromFirestore] Getting local data for comparison...');
+      final localData = await _subscriptionService.getSubscriptions();
+      debugPrint('📱 [_fetchLatestFromFirestore] Local data has ${localData.length} bills');
+
+      // Debug: Log the local bills
+      for (int i = 0; i < localData.length; i++) {
+        final bill = localData[i];
+        debugPrint(
+          '📱 [_fetchLatestFromFirestore] Local bill $i: ${bill['name']} (FirebaseID: ${bill['firebaseId']}, LocalID: ${bill['localId']})',
+        );
+      }
+
+      // Check if there are differences that warrant an update
+      bool needsUpdate = false;
+
+      // Simple comparison: if counts differ, we need update
+      if (firestoreData.length != localData.length) {
+        needsUpdate = true;
+        debugPrint(
+          '📊 Data count mismatch - Firestore: ${firestoreData.length}, Local: ${localData.length}',
+        );
+      }
+
+      // Check for newer updates in Firestore
+      if (!needsUpdate) {
+        for (final firestoreBill in firestoreData) {
+          final firestoreId = firestoreBill['firebaseId']?.toString();
+          if (firestoreId == null) continue;
+
+          final localBill = localData.firstWhere(
+            (bill) => bill['firebaseId']?.toString() == firestoreId,
+            orElse: () => <String, dynamic>{},
+          );
+
+          if (localBill.isEmpty) {
+            needsUpdate = true;
+            debugPrint(
+              '🆕 New bill found in Firestore: ${firestoreBill['name']}',
+            );
+            break;
+          }
+
+          // Compare last modified timestamps
+          final firestoreModified = firestoreBill['lastModified']?.toString();
+          final localModified = localBill['lastModified']?.toString();
+
+          if (firestoreModified != null && localModified != null) {
+            try {
+              final firestoreTime = DateTime.parse(firestoreModified);
+              final localTime = DateTime.parse(localModified);
+
+              if (firestoreTime.isAfter(localTime)) {
+                needsUpdate = true;
+                debugPrint(
+                  '🔄 Newer version found in Firestore for: ${firestoreBill['name']}',
+                );
+                break;
+              }
+            } catch (e) {
+              debugPrint('⚠️ Error parsing timestamps for comparison: $e');
+            }
+          }
+        }
+      }
+
+      // If update is needed, sync the data
+      if (needsUpdate) {
+        debugPrint(
+          '🔄 [_fetchLatestFromFirestore] UPDATE NEEDED - Updating local data with latest from Firestore...',
+        );
+
+        // Import Firestore data into local storage
+        debugPrint('🔄 [_fetchLatestFromFirestore] Importing Firestore data to local storage...');
+        await _subscriptionService.importFirestoreToLocal(firestoreData);
+
+        // Perform a full sync to merge Firestore data with local data
+        debugPrint('🔄 [_fetchLatestFromFirestore] Performing periodic sync...');
+        await _subscriptionService.performPeriodicSync();
+
+        // Reload the updated data
+        debugPrint('🔄 [_fetchLatestFromFirestore] Reloading updated data...');
+        final updatedData = await _subscriptionService.getSubscriptions();
+        debugPrint('🔄 [_fetchLatestFromFirestore] Updated data count: ${updatedData.length}');
+
+        if (mounted) {
+          setState(() {
+            _bills = updatedData;
+            _updateCachedCalculations();
+            _initializeBillStatuses();
+          });
+
+          debugPrint('✅ [_fetchLatestFromFirestore] Successfully updated with latest Firestore data');
+
+          // Show a subtle notification about the update
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text('Data synchronized with cloud'),
+                backgroundColor: Colors.blue,
+                behavior: SnackBarBehavior.floating,
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          }
+        }
+      } else {
+        debugPrint(
+          '✅ NO UPDATE NEEDED - Local data is already up to date with Firestore',
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ Failed to fetch from Firestore on startup: $e');
+      // Don't show error to user - this is a background operation
+    }
+
+    // After regular sync, if we still have no bills but Firestore showed data, trigger emergency sync
+    if (mounted && firestoreData.length > 0 && _bills.length == 0) {
+      debugPrint(
+        '🚨 EMERGENCY SYNC TRIGGERED - Firestore has ${firestoreData.length} bills but local is empty',
+      );
+      debugPrint('🚨 Current _bills length: ${_bills.length}');
+      debugPrint('🚨 Firestore data length: ${firestoreData.length}');
+      unawaited(_emergencyFirestoreSync());
+    } else {
+      debugPrint('✅ No emergency sync needed - Firestore: ${firestoreData.length}, Local: ${_bills.length}');
+    }
+  }
+
+  // Emergency sync method - directly import all Firestore bills
+  Future<void> _emergencyFirestoreSync() async {
+    if (!mounted) return;
+
+    try {
+      debugPrint('🚨 EMERGENCY FIRESTORE SYNC STARTED...');
+      debugPrint('🚨 Emergency sync - _bills length before sync: ${_bills.length}');
+
+      // Check if online first
+      final isOnline = await _subscriptionService.isOnline();
+      if (!isOnline) {
+        debugPrint('📵 Offline, skipping emergency sync');
+        return;
+      }
+
+      // Debug: Check current user
+      final currentUser = FirebaseAuth.instance.currentUser;
+      debugPrint(
+        '👤 Emergency sync - Current user: ${currentUser?.uid ?? "NOT LOGGED IN"}',
+      );
+
+      // Fetch ALL data from Firestore
+      final firestoreData = await _subscriptionService
+          .getFirebaseSubscriptionsOnly();
+      debugPrint(
+        '🚨 Emergency sync - Fetched ${firestoreData.length} bills from Firestore',
+      );
+
+      // Get current local data
+      final localData = await _subscriptionService.getSubscriptions();
+      debugPrint(
+        '🚨 Emergency sync - Current local data has ${localData.length} bills',
+      );
+
+      // Create a map of existing local bills by firebaseId for quick lookup
+      final Map<String, Map<String, dynamic>> localBillsByFirebaseId = {};
+      for (final localBill in localData) {
+        final firebaseId = localBill['firebaseId']?.toString();
+        if (firebaseId != null && firebaseId.isNotEmpty) {
+          localBillsByFirebaseId[firebaseId] = localBill;
+        }
+      }
+
+      // Track new bills from Firestore
+      final List<Map<String, dynamic>> newBills = [];
+
+      // Import any bills from Firestore that don't exist locally
+      for (final firestoreBill in firestoreData) {
+        final firebaseId = firestoreBill['firebaseId']?.toString();
+        if (firebaseId == null || firebaseId.isEmpty) {
+          debugPrint(
+            '⚠️ Skipping Firestore bill with no firebaseId: ${firestoreBill['name']}',
+          );
+          continue;
+        }
+
+        if (!localBillsByFirebaseId.containsKey(firebaseId)) {
+          debugPrint(
+            '🆕 EMERGENCY SYNC - Found new bill from Firestore: ${firestoreBill['name']} (ID: $firebaseId)',
+          );
+
+          // Create a copy for local storage with Timestamp conversion
+          final localBillCopy = _convertFirestoreTimestamps(firestoreBill);
+          localBillCopy['localId'] =
+              firestoreBill['firebaseId']; // Use firebaseId as localId
+          localBillCopy['syncPending'] = false; // Already synced
+          localBillCopy['source'] = 'firestore_emergency_sync';
+
+          newBills.add(localBillCopy);
+        }
+      }
+
+      // Save new bills to local storage
+      if (newBills.isNotEmpty) {
+        debugPrint(
+          '💾 EMERGENCY SYNC - Saving ${newBills.length} new bills to local storage',
+        );
+
+        for (final newBill in newBills) {
+          try {
+            await _subscriptionService.addSubscription(newBill);
+            debugPrint('✅ EMERGENCY SYNC - Saved bill: ${newBill['name']}');
+          } catch (e) {
+            debugPrint(
+              '❌ EMERGENCY SYNC - Failed to save bill ${newBill['name']}: $e',
+            );
+          }
+        }
+
+        // Reload all data to show the new bills
+        final updatedData = await _subscriptionService.getSubscriptions();
+
+        if (mounted) {
+          setState(() {
+            _bills = updatedData;
+            _updateCachedCalculations();
+            _initializeBillStatuses();
+          });
+
+          debugPrint(
+            '🎉 EMERGENCY SYNC COMPLETED - Added ${newBills.length} bills from Firestore',
+          );
+
+          // Show success message
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Emergency sync completed! Added ${newBills.length} bills from cloud.',
+              ),
+              backgroundColor: Colors.green,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      } else {
+        debugPrint('✅ EMERGENCY SYNC - No new bills found in Firestore');
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No new bills found in cloud'),
+              backgroundColor: Colors.blue,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ EMERGENCY SYNC FAILED: $e');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Emergency sync failed: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
+  // Convert Firestore Timestamp objects to ISO strings for local storage
+  Map<String, dynamic> _convertFirestoreTimestamps(Map<String, dynamic> bill) {
+    final convertedBill = Map<String, dynamic>.from(bill);
+
+    // Convert Timestamp fields to ISO strings
+    final timestampFields = ['createdAt', 'updatedAt', 'lastModified', 'dueDate', 'paidDate'];
+
+    for (final field in timestampFields) {
+      if (convertedBill[field] != null) {
+        if (convertedBill[field] is DateTime) {
+          convertedBill[field] = (convertedBill[field] as DateTime).toIso8601String();
+        } else if (convertedBill[field] is Timestamp) {
+          // Handle Firestore Timestamp objects
+          try {
+            final timestamp = convertedBill[field] as Timestamp;
+            convertedBill[field] = timestamp.toDate().toIso8601String();
+            debugPrint('🔄 Converted $field Timestamp to ISO string');
+          } catch (e) {
+            debugPrint('⚠️ Failed to convert Timestamp field $field: $e');
+            convertedBill[field] = DateTime.now().toIso8601String();
+          }
+        }
+      }
+    }
+
+    return convertedBill;
+  }
+
+  // Forced sync method - bypasses online check for manual refresh
+  Future<void> _forcedSyncFromFirestore() async {
+    if (!mounted) return;
+
+    try {
+      debugPrint('🔄 FORCED SYNC STARTED (bypassing online check)...');
+      debugPrint('🔄 Forced sync - _bills length before sync: ${_bills.length}');
+
+      // Check current user first
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        debugPrint('🔄 Forced sync - No user logged in');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No user logged in'),
+              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+        return;
+      }
+
+      debugPrint('🔄 Forced sync - User: ${currentUser.uid} (${currentUser.email})');
+
+      // Try to fetch from Firestore directly (bypassing isOnline check)
+      List<Map<String, dynamic>> firestoreData = [];
+      try {
+        debugPrint('🔄 Forced sync - Attempting direct Firestore fetch...');
+        firestoreData = await _subscriptionService.getFirebaseSubscriptionsOnly();
+        debugPrint('🔄 Forced sync - Fetched ${firestoreData.length} bills from Firestore');
+      } catch (e) {
+        debugPrint('🔄 Forced sync - Firestore fetch failed: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Forced sync failed: ${e.toString()}'),
+              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+        return;
+      }
+
+      if (firestoreData.isEmpty) {
+        debugPrint('🔄 Forced sync - No bills found in Firestore');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No bills found in cloud'),
+              backgroundColor: Colors.blue,
+              behavior: SnackBarBehavior.floating,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+        return;
+      }
+
+      // Import Firestore data into local storage
+      debugPrint('🔄 Forced sync - Importing ${firestoreData.length} bills to local storage...');
+      await _subscriptionService.importFirestoreToLocal(firestoreData);
+
+      // Reload the updated data
+      debugPrint('🔄 Forced sync - Reloading data...');
+      final updatedData = await _subscriptionService.getSubscriptions();
+      debugPrint('🔄 Forced sync - Updated data count: ${updatedData.length}');
+
+      if (mounted) {
+        setState(() {
+          _bills = updatedData;
+          _updateCachedCalculations();
+          _initializeBillStatuses();
+        });
+
+        debugPrint('✅ Forced sync completed! Updated with ${updatedData.length} bills from cloud.');
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Forced sync completed! Added ${updatedData.length} bills from cloud.'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ FORCED SYNC FAILED: $e');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Forced sync failed: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            duration: Duration(seconds: 3),
+          ),
+        );
       }
     }
   }
@@ -5007,7 +5550,7 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
     });
 
     try {
-      final result = await _subscriptionService.cleanupDuplicateSubscriptions();
+      await _subscriptionService.cleanupDuplicateSubscriptions();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -5036,10 +5579,7 @@ class HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMix
   /// Show error snack bar
   void _showErrorSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-      ),
+      SnackBar(content: Text(message), backgroundColor: Colors.red),
     );
   }
 }

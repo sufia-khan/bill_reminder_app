@@ -43,8 +43,8 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
   ];
   // gradient for icons & active labels
   List<Color> get _iconGradientColors => [
-    HSLColor.fromAHSL(1.0, 250, 0.84, 0.60).toColor(),
-    HSLColor.fromAHSL(1.0, 280, 0.75, 0.65).toColor(),
+    HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor(), // Lighter purple HSL(236, 89%, 65%)
+    HSLColor.fromAHSL(1.0, 236, 0.89, 0.75).toColor(), // Light purple HSL(236, 89%, 75%)
   ];
 
   @override
