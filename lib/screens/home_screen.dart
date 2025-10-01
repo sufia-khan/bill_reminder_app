@@ -1,9 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:projeckt_k/screens/profile_screen.dart';
+import 'package:projeckt_k/screens/settings_screen.dart';
 import 'package:projeckt_k/services/subscription_service.dart';
 import 'package:projeckt_k/services/notification_service.dart';
 import 'package:projeckt_k/services/app_lifecycle_manager.dart';
@@ -12,9 +13,10 @@ import 'package:projeckt_k/widgets/subtitle_changing.dart';
 import 'package:projeckt_k/widgets/bill_summary_cards.dart';
 import 'package:projeckt_k/widgets/bill_item_widget.dart';
 import 'package:projeckt_k/widgets/category_bills_bottom_sheet.dart';
-import 'package:projeckt_k/widgets/enhanced_bill_bottom_sheet.dart';
 import 'package:projeckt_k/widgets/horizontal_category_selector.dart';
+import 'package:projeckt_k/widgets/collapsible_bill_card.dart';
 import 'package:projeckt_k/widgets/summary_information_bar.dart';
+import 'package:projeckt_k/screens/add_edit_bill_screen.dart';
 
 // NOTE: this file contains some legacy code paths and conditional branches
 // that are intentionally permissive while we iterate on sync logic.
@@ -902,7 +904,81 @@ class HomeScreenState extends State<HomeScreen>
     // Create a clean copy of the bill data for editing
     final cleanBill = Map<String, dynamic>.from(bill);
 
-    await showAddBillBottomSheet(context, bill: cleanBill, editIndex: index);
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => AddEditBillScreen(
+          bill: cleanBill,
+          editIndex: index,
+          onBillSaved: (updatedBill, editIndex) async {
+            await _handleBillSaved(updatedBill, editIndex);
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _handleBillSaved(
+    Map<String, dynamic> billData,
+    int? editIndex,
+  ) async {
+    try {
+      if (editIndex != null) {
+        // Update existing bill
+        debugPrint('💾 Updating existing bill at index $editIndex');
+        await _updateBillInStorage(billData, editIndex);
+      } else {
+        // Add new bill
+        debugPrint('➕ Adding new bill');
+        await _addBillToStorage(billData);
+      }
+    } catch (e) {
+      debugPrint('❌ Error saving bill: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error saving bill: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _updateBillInStorage(
+    Map<String, dynamic> billData,
+    int index,
+  ) async {
+    // Update the bill in the list
+    setState(() {
+      _bills[index] = billData;
+      _updateCachedCalculations();
+    });
+
+    // Save to local storage
+    await _subscriptionService.updateSubscription(billData['id'], billData);
+
+    // Update reminders
+    await _updateBillReminders(billData);
+
+    debugPrint('✅ Bill updated successfully');
+  }
+
+  Future<void> _addBillToStorage(Map<String, dynamic> billData) async {
+    // Add to the list
+    setState(() {
+      _bills.add(billData);
+      _updateCachedCalculations();
+    });
+
+    // Save to local storage
+    await _subscriptionService.addSubscription(billData);
+
+    // Schedule reminders
+    await _updateBillReminders(billData);
+
+    debugPrint('✅ Bill added successfully');
   }
 
   Future<bool?> _showMarkAsPaidConfirmDialog(
@@ -1609,6 +1685,14 @@ class HomeScreenState extends State<HomeScreen>
   Widget build(BuildContext context) {
     super.build(context);
 
+    // Make status bar transparent so our gradient shows behind it
+    SystemChrome.setSystemUIOverlayStyle(
+      const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+      ),
+    );
+
     // Reset first build flag after first build
     if (_isFirstBuild) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1620,290 +1704,295 @@ class HomeScreenState extends State<HomeScreen>
       });
     }
 
-    // shared heights you used earlier
+    // ------------ tuning values (adjust these to change overlap) ------------
+    const double cardHeight = 140.0;
+    final double cardOverlap = cardHeight / 2.2; // less overlap (was /2)
+    const double headerInnerHeight = 130.0; // a little taller (was 110)
+    const double headerBottomPadding = 25.0; // more padding (was 24)
+    // -----------------------------------------------------------------------
+
+    final double topPadding = MediaQuery.of(context).padding.top;
+    final double headerTotalHeight =
+        topPadding + headerInnerHeight + headerBottomPadding;
+    final double contentPaddingTop = headerTotalHeight - cardOverlap;
+
+    // shared helpers (unchanged)
     final int upcomingCount = _getUpcoming7DaysCount();
     final String upcomingText = upcomingCount == 1
         ? '1 bill'
         : '$upcomingCount bills';
-
     const double sharedTop = 36;
     const double sharedMiddle = 72;
-    const double sharedBottom =
-        48; // Increased from 45 to accommodate larger font
+    const double sharedBottom = 48;
 
     return Scaffold(
-      appBar: null,
-      // ensure scaffold background is white
+      // draw body behind the status bar so gradient can extend into that area
+      extendBodyBehindAppBar: true,
       backgroundColor: Colors.white,
-      // don't draw body behind status bar (we already use SafeArea in the header)
-      extendBodyBehindAppBar: false,
-      body: Container(
-        color: Colors.white, // make the entire page white explicitly
-        child: Column(
-          children: [
-            // Custom header container
-            SafeArea(
-              bottom: false,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
+      body: Stack(
+        children: [
+          // Gradient header covering the very top (including status bar area)
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: Container(
+              height: headerTotalHeight,
+              padding: EdgeInsets.only(
+                top: topPadding + 16,
+                left: 16,
+                right: 16,
+                bottom: headerBottomPadding,
+              ),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Color(0xFF2563EB), // blue-600
+                    Color(0xFF7C3AED), // purple-600
+                  ],
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Top row: icon + title/subtitle + profile + sync status
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'SubManager',
+                    style: GoogleFonts.montserrat(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 22,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Never miss a due date again',
+                    style: TextStyle(color: Colors.white70, fontSize: 13),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Main scrollable content pushed down so cards overlap the headerTotalHeight by cardOverlap
+          Positioned.fill(
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: EdgeInsets.only(top: contentPaddingTop, bottom: 48),
+              children: [
+                // Summary Cards Row (white elevated cards)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Expanded(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Row(
-                          children: [
-                            const Icon(
-                              Icons.notifications_active_rounded,
-                              color: Colors.orange,
-                              size: 25,
-                            ),
-                            const SizedBox(width: 12),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'SubManager',
-                                  style: GoogleFonts.montserrat(
-                                    color: Colors.black87,
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 23,
+                        Expanded(
+                          child: Row(
+                            children: [
+                              // ---------- This Month Card ----------
+                              Expanded(
+                                child: Container(
+                                  height: 120,
+                                  margin: const EdgeInsets.only(
+                                    left: 5,
+                                    right: 5,
+                                  ),
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(16),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black12,
+                                        blurRadius: 8,
+                                        offset: Offset(0, 4),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisAlignment: MainAxisAlignment
+                                        .start, // no spaceBetween
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            Icons.calendar_month,
+                                            color: Colors.blue,
+                                            size: 20,
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            "This Month",
+                                            style: TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        "\$${_calculateMonthlyTotal().toStringAsFixed(2)}",
+                                        style: TextStyle(
+                                          fontSize: 20,
+                                          color: Colors.black,
+
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Flexible(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: [
+                                            Text(
+                                              "${_calculateMonthlyDifference().abs().toStringAsFixed(2)}",
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w600,
+                                                color: Colors.grey[800],
+                                              ),
+                                            ),
+                                            Text(
+                                              _calculateMonthlyDifference() > 0
+                                                  ? "more than last month"
+                                                  : "less than last month",
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                color: Colors.grey[600],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-
-                                const SizedBox(height: 2),
-                                const ChangingSubtitle(),
-                              ],
-                            ),
-                          ],
-                        ),
-
-                        // Sync status and profile row
-                        Row(
-                          children: [
-                            // Refresh button for manual sync
-                            GestureDetector(
-                              onTap: () async {
-                                debugPrint('🔄 Refresh button tapped. Current _isOnline: $_isOnline');
-
-                                // Force check connectivity before proceeding
-                                await _checkConnectivity();
-                                debugPrint('🔄 After connectivity check. _isOnline: $_isOnline');
-
-                                if (_isOnline) {
-                                  debugPrint('🔄 Manual refresh triggered (online mode)...');
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        'Refreshing data from cloud...',
-                                      ),
-                                      backgroundColor: Colors.blue,
-                                      duration: Duration(seconds: 2),
-                                    ),
-                                  );
-                                  await _fetchLatestFromFirestore();
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        'Data synchronized with cloud!',
-                                      ),
-                                      backgroundColor: Colors.green,
-                                      duration: Duration(seconds: 2),
-                                    ),
-                                  );
-                                } else {
-                                  debugPrint('🔄 Manual refresh triggered (forced mode - user override)...');
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        'Attempting to sync anyway (user override)...',
-                                      ),
-                                      backgroundColor: Colors.orange,
-                                      duration: Duration(seconds: 2),
-                                    ),
-                                  );
-                                  // Force sync regardless of online status for manual refresh
-                                  await _forcedSyncFromFirestore();
-                                }
-                              },
-                              child: Column(
-                                children: [
-                                  CircleAvatar(
-                                    radius: 18,
-                                    backgroundColor: Colors.blue.withValues(
-                                      alpha: 0.15,
-                                    ),
-                                    child: Icon(
-                                      Icons.refresh,
-                                      color: Colors.blue,
-                                      size: 20,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                ],
                               ),
-                            ),
-                            const SizedBox(width: 16),
-                            // Profile (kept inside the same top row)
-                            GestureDetector(
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => const ProfileScreen(),
+
+                              // ---------- Next 7 Days Card ----------
+                              Expanded(
+                                child: Container(
+                                  height: 120, // fixed equal height
+                                  margin: const EdgeInsets.only(
+                                    right: 5,
+                                    left: 5,
                                   ),
-                                );
-                              },
-                              child: Column(
-                                children: [
-                                  CircleAvatar(
-                                    radius: 18,
-                                    backgroundColor: Colors.indigoAccent
-                                        .withValues(alpha: 0.15), // light bg
-                                    child: Icon(
-                                      Icons.person, // 🔄 subscription icon
-                                      color: Colors.indigoAccent, // main color
-                                      size: 22,
-                                    ),
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(16),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black12,
+                                        blurRadius: 8,
+                                        offset: Offset(0, 4),
+                                      ),
+                                    ],
                                   ),
-                                  const SizedBox(height: 8),
-                                ],
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisAlignment: MainAxisAlignment
+                                        .start, // no spaceBetween
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            Icons.schedule,
+                                            color: Colors.purple,
+                                            size: 20,
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            "Next 7 Days",
+                                            style: TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        "\$${_calculateThisMonthTotal().toStringAsFixed(2)}",
+                                        style: TextStyle(
+                                          fontSize: 20,
+                                          color: Colors.black,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 10),
+                                      Flexible(
+                                        child: Text(
+                                          "${_calculateUpcoming7DaysCount()} bills",
+                                          style: TextStyle(
+                                            fontSize: 20,
+                                            color: Colors.grey[600],
+                                          ),
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                               ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: BillSummaryCard(
-                            title: "This Month",
-                            icon: Icons.trending_up_rounded,
-                            gradientColors: [
-                              HSLColor.fromAHSL(
-                                1.0,
-                                236,
-                                0.89,
-                                0.65,
-                              ).toColor(), // Lighter purple HSL(236, 89%, 65%)
-                              HSLColor.fromAHSL(
-                                1.0,
-                                236,
-                                0.89,
-                                0.75,
-                              ).toColor(), // Light purple HSL(236, 89%, 75%)
                             ],
-                            primaryValue:
-                                "\$${_calculateMonthlyTotal().toStringAsFixed(2)}",
-                            secondaryAmount:
-                                "\$${_calculateMonthlyDifference().abs().toStringAsFixed(2)}",
-                            secondaryText: _calculateMonthlyDifference() > 0
-                                ? "more than last month"
-                                : "less than last month",
-                            topBoxHeight: sharedTop,
-                            middleBoxHeight: sharedMiddle,
-                            bottomBoxHeight: sharedBottom,
-                            // keep This Month bottom sizes as before
-                            bottomAmountFontSize: 14,
-                            bottomTextFontSize:
-                                15, // Increased from 13 for consistency
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: BillSummaryCard(
-                            title: "Next 7 Days",
-                            icon: Icons.calendar_today_rounded,
-                            gradientColors: [
-                              HSLColor.fromAHSL(
-                                1.0,
-                                25,
-                                0.90,
-                                0.60,
-                              ).toColor(), // Lighter modern orange
-                              HSLColor.fromAHSL(
-                                1.0,
-                                15,
-                                0.85,
-                                0.65,
-                              ).toColor(), // Lighter warm orange
-                            ],
-                            primaryValue:
-                                "\$${_getUpcoming7DaysTotal().toStringAsFixed(2)}",
-
-                            // show the count and keep same sizing as This Month for equal heights
-                            secondaryText: "${_getUpcoming7DaysCount()} bills",
-                            topBoxHeight: sharedTop,
-                            middleBoxHeight: sharedMiddle,
-                            bottomBoxHeight: sharedBottom,
-                            // Make Next 7 Days bottom text extremely large to match visual weight of This Month's two lines
-                            bottomAmountFontSize: 21,
-                            bottomTextFontSize:
-                                21, // Extremely large font to balance the single line vs This Month's two lines
                           ),
                         ),
                       ],
                     ),
-                  ],
+                  ),
                 ),
-              ),
-            ),
 
-            // Main content
-            Expanded(
-              child: SafeArea(
-                top: false,
-                minimum: const EdgeInsets.all(6),
-                child: ListView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.only(top: 6),
-                  children: [
-                    // Category Selection and Summary Information
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: HorizontalCategorySelector(
-                        categories: Category.defaultCategories,
-                        selectedCategory: selectedCategory,
-                        onCategorySelected: (category) {
-                          setState(() {
-                            selectedCategory = category;
-                          });
-                        },
-                        totalBills: _bills.length,
-                        getCategoryBillCount: _getCategoryBillCount,
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: SummaryInformationBar(
-                        billCount: _getFilteredBillCount(),
-                        totalAmount: _getFilteredTotalAmount(),
-                      ),
-                    ),
+                // spacing so next content isn't jammed under cards
+                SizedBox(height: cardOverlap - 12),
 
-                    const SizedBox(height: 8),
-
-                    // Filtered Bills Content
-                    Container(
-                      constraints: BoxConstraints(
-                        minHeight: MediaQuery.of(context).size.height * 0.4,
-                      ),
-                      child: _buildFilteredBillsContent(),
-                    ),
-                  ],
+                // Categories + summary bar (unchanged)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: HorizontalCategorySelector(
+                    categories: Category.defaultCategories,
+                    selectedCategory: selectedCategory,
+                    onCategorySelected: (category) {
+                      setState(() {
+                        selectedCategory = category;
+                      });
+                    },
+                    totalBills: _bills.length,
+                    getCategoryBillCount: _getCategoryBillCount,
+                  ),
                 ),
-              ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: SummaryInformationBar(
+                    billCount: _getFilteredBillCount(),
+                    totalAmount: _getFilteredTotalAmount(),
+                  ),
+                ),
+
+                const SizedBox(height: 8),
+
+                Container(
+                  constraints: BoxConstraints(
+                    minHeight: MediaQuery.of(context).size.height * 0.4,
+                  ),
+                  child: _buildFilteredBillsContent(),
+                ),
+
+                const SizedBox(height: 48),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -2124,173 +2213,32 @@ class HomeScreenState extends State<HomeScreen>
   }
 
   Widget _buildBillCard(Map<String, dynamic> bill, int index) {
-    // Cache frequently accessed values for better performance
-    final dueDate = _parseDueDate(bill);
-    final now = DateTime.now();
-    final isOverdue =
-        dueDate != null && dueDate.isBefore(now) && bill['status'] != 'paid';
-    final isPaid = bill['status'] == 'paid';
     final category = bill['category'] != null
         ? Category.findById(bill['category'].toString())
         : null;
-    final billId = _getBillId(bill);
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: Card(
-        elevation: 6,
-        shadowColor: Colors.black.withValues(alpha: 0.15),
-        color: Colors.white,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(
-            color: isOverdue
-                ? Colors.red.withValues(alpha: 0.3)
-                : Colors.transparent,
-            width: isOverdue ? 1.5 : 0,
-          ),
-        ),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: () => _showBillManagementBottomSheet(context, bill, index),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Main content row
-                Row(
-                  children: [
-                    // Category icon
-                    Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: _getCategoryColor(category?.id),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Icon(
-                        category?.icon ?? Icons.receipt,
-                        color: Colors.white,
-                        size: 20,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-
-                    // Bill details
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Bill name
-                          Text(
-                            bill['name']?.toString() ?? 'Unnamed Bill',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.black87,
-                              fontFamily: GoogleFonts.poppins().fontFamily,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 2),
-
-                          // Category name
-                          Text(
-                            category?.name ?? 'Uncategorized',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                              color: Colors.grey[600],
-                              fontFamily: GoogleFonts.poppins().fontFamily,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-
-                          // Frequency
-                          Text(
-                            _getFrequencyText(bill['frequency']?.toString()),
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w400,
-                              color: Colors.grey[500],
-                              fontFamily: GoogleFonts.poppins().fontFamily,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    // Amount and status
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          '\$${bill['amount']?.toString() ?? '0.00'}',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                            color: isOverdue ? Colors.red : Colors.black87,
-                            fontFamily: GoogleFonts.poppins().fontFamily,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        // Status text below amount
-                        Text(
-                          isPaid
-                              ? 'Paid'
-                              : isOverdue
-                              ? 'Overdue'
-                              : _getSmartDueDateText(dueDate),
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: isPaid
-                                ? Colors.green
-                                : isOverdue
-                                ? Colors.red
-                                : Colors.blue[700],
-                            fontFamily: GoogleFonts.poppins().fontFamily,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        // Manage text button
-                        GestureDetector(
-                          onTap: () => _showBillManagementBottomSheet(
-                            context,
-                            bill,
-                            index,
-                          ),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.blue.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              'Manage',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.blue[700],
-                                fontFamily: GoogleFonts.poppins().fontFamily,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
+    return CollapsibleBillCard(
+      bill: bill,
+      index: index,
+      category: category,
+      onMarkAsPaid: (billIndex) async {
+        bool? confirm = await _showMarkAsPaidConfirmDialog(
+          context,
+          bill['name']?.toString() ?? 'this bill',
+        );
+        if (confirm == true) {
+          await _markBillAsPaid(billIndex);
+        }
+      },
+      onEdit: (billIndex) async {
+        await _editBill(billIndex);
+      },
+      onDelete: (billIndex) async {
+        bool? confirm = await _showDeleteConfirmDialog(context);
+        if (confirm == true) {
+          await _deleteSubscription(billIndex);
+        }
+      },
     );
   }
 
@@ -4361,10 +4309,10 @@ class HomeScreenState extends State<HomeScreen>
                         ],
                       ),
                     ),
-                  
+                  ),
                 ),
               ),
-            ));
+            );
           },
         ),
       );
@@ -4378,6 +4326,24 @@ class HomeScreenState extends State<HomeScreen>
       setState(() {
         _isAddingBill = false;
       });
+    }
+  }
+
+  // Show full-screen add bill screen
+  Future<void> showAddBillFullScreen(BuildContext context) async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => AddEditBillScreen(
+          onBillSaved: (billData, editIndex) async {
+            Navigator.pop(context, billData);
+          },
+        ),
+      ),
+    );
+
+    if (result != null && result is Map<String, dynamic>) {
+      await _handleBillSaved(result, null);
     }
   }
 
@@ -4753,27 +4719,39 @@ class HomeScreenState extends State<HomeScreen>
 
     try {
       debugPrint('🔥 [_fetchLatestFromFirestore] Starting fetch process...');
-      debugPrint('🔥 [_fetchLatestFromFirestore] Current _bills count: ${_bills.length}');
+      debugPrint(
+        '🔥 [_fetchLatestFromFirestore] Current _bills count: ${_bills.length}',
+      );
 
       // Check if online first
       debugPrint('🔥 [_fetchLatestFromFirestore] Checking online status...');
       final isOnline = await _subscriptionService.isOnline();
-      debugPrint('🔥 [_fetchLatestFromFirestore] Online status result: $isOnline');
+      debugPrint(
+        '🔥 [_fetchLatestFromFirestore] Online status result: $isOnline',
+      );
 
       if (!isOnline) {
-        debugPrint('📵 [_fetchLatestFromFirestore] Offline, skipping Firestore fetch');
+        debugPrint(
+          '📵 [_fetchLatestFromFirestore] Offline, skipping Firestore fetch',
+        );
         return;
       }
 
       // Debug: Check current user
       final currentUser = FirebaseAuth.instance.currentUser;
-      debugPrint('👤 [_fetchLatestFromFirestore] Current user: ${currentUser?.uid ?? "NOT LOGGED IN"}');
-      debugPrint('📧 [_fetchLatestFromFirestore] User email: ${currentUser?.email ?? "UNKNOWN"}');
+      debugPrint(
+        '👤 [_fetchLatestFromFirestore] Current user: ${currentUser?.uid ?? "NOT LOGGED IN"}',
+      );
+      debugPrint(
+        '📧 [_fetchLatestFromFirestore] User email: ${currentUser?.email ?? "UNKNOWN"}',
+      );
 
       // Fetch fresh data from Firestore
       debugPrint('🔥 [_fetchLatestFromFirestore] Fetching from Firestore...');
       firestoreData = await _subscriptionService.getFirebaseSubscriptionsOnly();
-      debugPrint('✅ [_fetchLatestFromFirestore] Fetched ${firestoreData.length} bills from Firestore');
+      debugPrint(
+        '✅ [_fetchLatestFromFirestore] Fetched ${firestoreData.length} bills from Firestore',
+      );
 
       // Debug: Log the fetched bills
       for (int i = 0; i < firestoreData.length; i++) {
@@ -4784,9 +4762,13 @@ class HomeScreenState extends State<HomeScreen>
       }
 
       // Get local data for comparison
-      debugPrint('🔥 [_fetchLatestFromFirestore] Getting local data for comparison...');
+      debugPrint(
+        '🔥 [_fetchLatestFromFirestore] Getting local data for comparison...',
+      );
       final localData = await _subscriptionService.getSubscriptions();
-      debugPrint('📱 [_fetchLatestFromFirestore] Local data has ${localData.length} bills');
+      debugPrint(
+        '📱 [_fetchLatestFromFirestore] Local data has ${localData.length} bills',
+      );
 
       // Debug: Log the local bills
       for (int i = 0; i < localData.length; i++) {
@@ -4856,17 +4838,23 @@ class HomeScreenState extends State<HomeScreen>
         );
 
         // Import Firestore data into local storage
-        debugPrint('🔄 [_fetchLatestFromFirestore] Importing Firestore data to local storage...');
+        debugPrint(
+          '🔄 [_fetchLatestFromFirestore] Importing Firestore data to local storage...',
+        );
         await _subscriptionService.importFirestoreToLocal(firestoreData);
 
         // Perform a full sync to merge Firestore data with local data
-        debugPrint('🔄 [_fetchLatestFromFirestore] Performing periodic sync...');
+        debugPrint(
+          '🔄 [_fetchLatestFromFirestore] Performing periodic sync...',
+        );
         await _subscriptionService.performPeriodicSync();
 
         // Reload the updated data
         debugPrint('🔄 [_fetchLatestFromFirestore] Reloading updated data...');
         final updatedData = await _subscriptionService.getSubscriptions();
-        debugPrint('🔄 [_fetchLatestFromFirestore] Updated data count: ${updatedData.length}');
+        debugPrint(
+          '🔄 [_fetchLatestFromFirestore] Updated data count: ${updatedData.length}',
+        );
 
         if (mounted) {
           setState(() {
@@ -4875,7 +4863,9 @@ class HomeScreenState extends State<HomeScreen>
             _initializeBillStatuses();
           });
 
-          debugPrint('✅ [_fetchLatestFromFirestore] Successfully updated with latest Firestore data');
+          debugPrint(
+            '✅ [_fetchLatestFromFirestore] Successfully updated with latest Firestore data',
+          );
 
           // Show a subtle notification about the update
           if (mounted) {
@@ -4908,7 +4898,9 @@ class HomeScreenState extends State<HomeScreen>
       debugPrint('🚨 Firestore data length: ${firestoreData.length}');
       unawaited(_emergencyFirestoreSync());
     } else {
-      debugPrint('✅ No emergency sync needed - Firestore: ${firestoreData.length}, Local: ${_bills.length}');
+      debugPrint(
+        '✅ No emergency sync needed - Firestore: ${firestoreData.length}, Local: ${_bills.length}',
+      );
     }
   }
 
@@ -4918,7 +4910,9 @@ class HomeScreenState extends State<HomeScreen>
 
     try {
       debugPrint('🚨 EMERGENCY FIRESTORE SYNC STARTED...');
-      debugPrint('🚨 Emergency sync - _bills length before sync: ${_bills.length}');
+      debugPrint(
+        '🚨 Emergency sync - _bills length before sync: ${_bills.length}',
+      );
 
       // Check if online first
       final isOnline = await _subscriptionService.isOnline();
@@ -5062,12 +5056,19 @@ class HomeScreenState extends State<HomeScreen>
     final convertedBill = Map<String, dynamic>.from(bill);
 
     // Convert Timestamp fields to ISO strings
-    final timestampFields = ['createdAt', 'updatedAt', 'lastModified', 'dueDate', 'paidDate'];
+    final timestampFields = [
+      'createdAt',
+      'updatedAt',
+      'lastModified',
+      'dueDate',
+      'paidDate',
+    ];
 
     for (final field in timestampFields) {
       if (convertedBill[field] != null) {
         if (convertedBill[field] is DateTime) {
-          convertedBill[field] = (convertedBill[field] as DateTime).toIso8601String();
+          convertedBill[field] = (convertedBill[field] as DateTime)
+              .toIso8601String();
         } else if (convertedBill[field] is Timestamp) {
           // Handle Firestore Timestamp objects
           try {
@@ -5091,7 +5092,9 @@ class HomeScreenState extends State<HomeScreen>
 
     try {
       debugPrint('🔄 FORCED SYNC STARTED (bypassing online check)...');
-      debugPrint('🔄 Forced sync - _bills length before sync: ${_bills.length}');
+      debugPrint(
+        '🔄 Forced sync - _bills length before sync: ${_bills.length}',
+      );
 
       // Check current user first
       final currentUser = FirebaseAuth.instance.currentUser;
@@ -5110,14 +5113,19 @@ class HomeScreenState extends State<HomeScreen>
         return;
       }
 
-      debugPrint('🔄 Forced sync - User: ${currentUser.uid} (${currentUser.email})');
+      debugPrint(
+        '🔄 Forced sync - User: ${currentUser.uid} (${currentUser.email})',
+      );
 
       // Try to fetch from Firestore directly (bypassing isOnline check)
       List<Map<String, dynamic>> firestoreData = [];
       try {
         debugPrint('🔄 Forced sync - Attempting direct Firestore fetch...');
-        firestoreData = await _subscriptionService.getFirebaseSubscriptionsOnly();
-        debugPrint('🔄 Forced sync - Fetched ${firestoreData.length} bills from Firestore');
+        firestoreData = await _subscriptionService
+            .getFirebaseSubscriptionsOnly();
+        debugPrint(
+          '🔄 Forced sync - Fetched ${firestoreData.length} bills from Firestore',
+        );
       } catch (e) {
         debugPrint('🔄 Forced sync - Firestore fetch failed: $e');
         if (mounted) {
@@ -5149,7 +5157,9 @@ class HomeScreenState extends State<HomeScreen>
       }
 
       // Import Firestore data into local storage
-      debugPrint('🔄 Forced sync - Importing ${firestoreData.length} bills to local storage...');
+      debugPrint(
+        '🔄 Forced sync - Importing ${firestoreData.length} bills to local storage...',
+      );
       await _subscriptionService.importFirestoreToLocal(firestoreData);
 
       // Reload the updated data
@@ -5164,11 +5174,15 @@ class HomeScreenState extends State<HomeScreen>
           _initializeBillStatuses();
         });
 
-        debugPrint('✅ Forced sync completed! Updated with ${updatedData.length} bills from cloud.');
+        debugPrint(
+          '✅ Forced sync completed! Updated with ${updatedData.length} bills from cloud.',
+        );
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Forced sync completed! Added ${updatedData.length} bills from cloud.'),
+            content: Text(
+              'Forced sync completed! Added ${updatedData.length} bills from cloud.',
+            ),
             backgroundColor: Colors.green,
             behavior: SnackBarBehavior.floating,
             duration: Duration(seconds: 3),

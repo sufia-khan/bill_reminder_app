@@ -16,25 +16,25 @@ class BillSummaryCard extends StatelessWidget {
 
     // Box section heights
     this.topBoxHeight = 2,
-    this.middleBoxHeight = 17,
-    this.bottomBoxHeight = 9,
+    this.middleBoxHeight = 12,
+    this.bottomBoxHeight = 6,
 
     // Font sizes
-    this.primaryFontSize = 24,
-    this.minPrimaryFontSize = 10,
-    this.bottomAmountFontSize = 7,
-    this.bottomTextFontSize = 7,
-    this.minBottomFontSize = 6,
+    this.primaryFontSize = 20,
+    this.minPrimaryFontSize = 8,
+    this.bottomAmountFontSize = 6,
+    this.bottomTextFontSize = 6,
+    this.minBottomFontSize = 5,
 
-    this.innerPadding = const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+    this.innerPadding = const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
 
     // Icon configs
-    this.iconSize = 18,
+    this.iconSize = 16,
     this.iconOnRight = false,
-    this.textIconGap = 6,
+    this.textIconGap = 4,
 
     // NEW → extra boost for bottom box only
-    this.bottomHeightBoost = 6,
+    this.bottomHeightBoost = 4,
   }) : assert(gradientColors.length >= 2),
        super(key: key);
 
@@ -64,31 +64,33 @@ class BillSummaryCard extends StatelessWidget {
 
   // ----------------------
   Widget _topRow() {
+    final isWhiteCard = gradientColors.every((color) => color == Colors.white);
+
     final iconWidget = Container(
-      padding: const EdgeInsets.all(6),
+      padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.15),
-        borderRadius: BorderRadius.circular(10),
+        color: isWhiteCard ? HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor().withValues(alpha: 0.1) : Colors.white.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(8),
       ),
-      child: Icon(icon, color: Colors.white, size: 20.0),
+      child: Icon(icon, color: isWhiteCard ? HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor() : Colors.white, size: iconSize),
     );
 
     final titleWidget = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.18), // Slightly more opaque for better contrast
-        borderRadius: BorderRadius.circular(14),
+        color: isWhiteCard ? Colors.grey.shade100 : Colors.white.withOpacity(0.18),
+        borderRadius: BorderRadius.circular(10),
       ),
       child: AutoSizeText(
         title,
         textAlign: TextAlign.left,
         style: GoogleFonts.poppins(
-          color: Colors.white,
-          fontSize: 13,
+          color: isWhiteCard ? Colors.grey.shade700 : Colors.white,
+          fontSize: 11,
           fontWeight: FontWeight.w600,
         ),
         maxLines: 1,
-        minFontSize: 10,
+        minFontSize: 8,
         overflow: TextOverflow.ellipsis,
       ),
     );
@@ -103,6 +105,7 @@ class BillSummaryCard extends StatelessWidget {
 
   /// Bottom widget
   Widget _buildBottom(double widthAvailable) {
+    final isWhiteCard = gradientColors.every((color) => color == Colors.white);
     final hasAmount = (secondaryAmount?.trim().isNotEmpty ?? false);
     final hasText = (secondaryText?.trim().isNotEmpty ?? false);
 
@@ -117,7 +120,7 @@ class BillSummaryCard extends StatelessWidget {
             style: GoogleFonts.poppins(
               fontSize: bottomAmountFontSize,
               fontWeight: FontWeight.bold,
-              color: Colors.white,
+              color: isWhiteCard ? Colors.grey.shade700 : Colors.white,
             ),
             maxLines: 1,
             minFontSize: minBottomFontSize,
@@ -129,7 +132,7 @@ class BillSummaryCard extends StatelessWidget {
             style: GoogleFonts.poppins(
               fontSize: bottomTextFontSize,
               fontWeight: FontWeight.w500,
-              color: Colors.white70,
+              color: isWhiteCard ? Colors.grey.shade500 : Colors.white70,
             ),
             maxLines: 1,
             minFontSize: minBottomFontSize,
@@ -152,7 +155,7 @@ class BillSummaryCard extends StatelessWidget {
         style: GoogleFonts.poppins(
           fontSize: bottomAmountFontSize,
           fontWeight: hasAmount ? FontWeight.bold : FontWeight.w600,
-          color: hasAmount ? Colors.white : Colors.white70,
+          color: isWhiteCard ? (hasAmount ? Colors.grey.shade700 : Colors.grey.shade500) : (hasAmount ? Colors.white : Colors.white70),
         ),
         maxLines: 1,
         minFontSize: minBottomFontSize,
@@ -163,7 +166,8 @@ class BillSummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const double netScale = 0.85 * 0.85; // compact scaling
+    final isWhiteCard = gradientColors.every((color) => color == Colors.white);
+    const double netScale = 0.75 * 0.75; // more compact scaling
 
     final double topH = topBoxHeight * netScale;
     final double midH = middleBoxHeight * netScale;
@@ -207,7 +211,7 @@ class BillSummaryCard extends StatelessWidget {
     // 🔹 add boost only to bottom box
     bottomH += bottomHeightBoost;
 
-    const double safeBuffer = 3.0;
+    const double safeBuffer = 1.0;
     final double totalHeight =
         topH +
         midH +
@@ -232,7 +236,7 @@ class BillSummaryCard extends StatelessWidget {
                 primaryValue,
                 textAlign: TextAlign.left,
                 style: GoogleFonts.poppins(
-                  color: Colors.white,
+                  color: isWhiteCard ? Colors.grey.shade900 : Colors.white,
                   fontSize: primaryFontSize,
                   fontWeight: FontWeight.w700, // Slightly bolder for modern look
                   letterSpacing: -0.5, // Slight letter spacing for premium feel
@@ -273,20 +277,31 @@ class BillSummaryCard extends StatelessWidget {
           height: totalHeight,
           padding: finalInnerPadding,
           decoration: BoxDecoration(
-            gradient: LinearGradient(
+            gradient: isWhiteCard ? null : LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: gradientColors,
             ),
+            color: isWhiteCard ? Colors.white : null,
+            border: isWhiteCard ? Border.all(
+              color: title == "This Month"
+                ? HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor().withValues(alpha: 0.3)
+                : HSLColor.fromAHSL(1.0, 25, 0.90, 0.60).toColor().withValues(alpha: 0.3),
+              width: 1.5,
+            ) : null,
             borderRadius: BorderRadius.circular(16), // Slightly more rounded for modern look
             boxShadow: [
               BoxShadow(
-                color: gradientColors.first.withOpacity(0.15), // Increased opacity for better shadow
+                color: isWhiteCard
+                  ? Colors.grey.shade300.withOpacity(0.3)
+                  : gradientColors.first.withValues(alpha: 0.15), // Increased opacity for better shadow
                 blurRadius: 12, // Increased blur for softer shadow
                 offset: const Offset(0, 6), // Slightly increased offset
               ),
               BoxShadow(
-                color: gradientColors.first.withOpacity(0.05), // Additional subtle shadow
+                color: isWhiteCard
+                  ? Colors.grey.shade200.withOpacity(0.1)
+                  : gradientColors.first.withValues(alpha: 0.05), // Additional subtle shadow
                 blurRadius: 20,
                 offset: const Offset(0, 2),
                 spreadRadius: -2,

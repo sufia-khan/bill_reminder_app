@@ -58,9 +58,7 @@ class EnhancedBottomSheetService {
   }
 
   // Show category bottom sheet with smooth animations
-  static Future<Category?> showCategoryBottomSheet(
-    BuildContext context,
-  ) async {
+  static Future<Category?> showCategoryBottomSheet(BuildContext context) async {
     return await _showEnhancedBottomSheet<Category>(
       context: context,
       title: 'Select Category',
@@ -88,10 +86,7 @@ class EnhancedBottomSheetService {
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (context) => _EnhancedBottomSheet(
-        title: title,
-        child: child,
-      ),
+      builder: (context) => _EnhancedBottomSheet(title: title, child: child),
     );
     return result;
   }
@@ -119,16 +114,17 @@ class EnhancedBottomSheetService {
               borderRadius: BorderRadius.circular(12),
               onTap: () => onTap(item),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 decoration: BoxDecoration(
                   color: isSelected
                       ? Colors.blue.withOpacity(0.1)
                       : Colors.grey[50],
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: isSelected
-                        ? Colors.blue
-                        : Colors.grey[300]!,
+                    color: isSelected ? Colors.blue : Colors.grey[300]!,
                     width: 1,
                   ),
                 ),
@@ -147,11 +143,7 @@ class EnhancedBottomSheetService {
                       ),
                     ),
                     if (isSelected)
-                      Icon(
-                        Icons.check_circle,
-                        color: Colors.blue,
-                        size: 24,
-                      ),
+                      Icon(Icons.check_circle, color: Colors.blue, size: 24),
                   ],
                 ),
               ),
@@ -183,14 +175,14 @@ class EnhancedBottomSheetService {
               borderRadius: BorderRadius.circular(12),
               onTap: () => onTap(category),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.grey[50],
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: Colors.grey[300]!,
-                    width: 1,
-                  ),
+                  border: Border.all(color: Colors.grey[300]!, width: 1),
                 ),
                 child: Row(
                   children: [
@@ -239,10 +231,7 @@ class _EnhancedBottomSheet extends StatefulWidget {
   final String title;
   final Widget child;
 
-  const _EnhancedBottomSheet({
-    required this.title,
-    required this.child,
-  });
+  const _EnhancedBottomSheet({required this.title, required this.child});
 
   @override
   State<_EnhancedBottomSheet> createState() => _EnhancedBottomSheetState();
@@ -315,7 +304,10 @@ class _EnhancedBottomSheetState extends State<_EnhancedBottomSheet>
                 children: [
                   // Header with cross icon
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 16,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.grey[50],
                       borderRadius: const BorderRadius.vertical(
@@ -346,19 +338,19 @@ class _EnhancedBottomSheetState extends State<_EnhancedBottomSheet>
                         // Cross icon
                         GestureDetector(
                           onTap: _closeBottomSheet,
-                            child: Container(
-                              width: 32,
-                              height: 32,
-                              decoration: BoxDecoration(
-                                color: Colors.grey[200],
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              child: const Icon(
-                                Icons.close,
-                                size: 18,
-                                color: Colors.grey,
-                              ),
+                          child: Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              color: Colors.grey[200],
+                              borderRadius: BorderRadius.circular(16),
                             ),
+                            child: const Icon(
+                              Icons.close,
+                              size: 18,
+                              color: Colors.grey,
+                            ),
+                          ),
                         ),
                       ],
                     ),

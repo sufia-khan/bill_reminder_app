@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:projeckt_k/models/category_model.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-class BillItemWidget extends StatelessWidget {
+class BillItemWidget extends StatefulWidget {
   final Map<String, dynamic> bill;
   final Function(int) onMarkAsPaid;
   final Function(int) onDelete;
@@ -11,28 +11,35 @@ class BillItemWidget extends StatelessWidget {
   final bool useHomeScreenEdit;
 
   const BillItemWidget({
-    Key? key,
+    super.key,
     required this.bill,
     required this.onMarkAsPaid,
     required this.onDelete,
     required this.onEdit,
     required this.onShowDetails,
     this.useHomeScreenEdit = false,
-  }) : super(key: key);
+  });
+
+  @override
+  State<BillItemWidget> createState() => _BillItemWidgetState();
+}
+
+class _BillItemWidgetState extends State<BillItemWidget> {
+  Map<String, dynamic> get bill => widget.bill;
 
   @override
   Widget build(BuildContext context) {
-    final dueDate = _parseDueDate(bill);
+    final dueDate = _parseDueDate(widget.bill);
     final now = DateTime.now();
     final isOverdue =
-        dueDate != null && dueDate.isBefore(now) && bill['status'] != 'paid';
-    final isPaid = bill['status'] == 'paid';
-    final billIndex = bill['index'] ?? 0;
+        dueDate != null && dueDate.isBefore(now) && widget.bill['status'] != 'paid';
+    final isPaid = widget.bill['status'] == 'paid';
+    final billIndex = widget.bill['index'] ?? 0;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       child: Dismissible(
-        key: Key('bill_${bill['id']}_${bill['localId']}_${billIndex}_${DateTime.now().millisecondsSinceEpoch}'),
+        key: Key('bill_${widget.bill['id']}_${widget.bill['localId']}_${billIndex}_${DateTime.now().millisecondsSinceEpoch}'),
         background: Container(
           margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
           decoration: BoxDecoration(
@@ -101,12 +108,22 @@ class BillItemWidget extends StatelessWidget {
           DismissDirection.startToEnd: 0.3,
         },
         confirmDismiss: (direction) async {
-          debugPrint('🔍 Swipe detected: $direction for bill ${bill['name']}');
-          return await _showDeleteConfirmDialog(context, bill);
+          debugPrint('🔍 Swipe detected: $direction for bill ${widget.bill['name']}');
+          // Prevent dismissal if bill is already being processed
+          if (widget.bill['_isDeleting'] == true || widget.bill['_isUpdating'] == true) {
+            debugPrint('⚠️ Bill is already being processed, preventing dismissal');
+            return false;
+          }
+          return await _showDeleteConfirmDialog(context, widget.bill);
         },
-        onDismissed: (direction) {
-          debugPrint('🗑️ Bill dismissed: ${bill['name']} in direction: $direction');
-          onDelete(billIndex);
+        onDismissed: (direction) async {
+          debugPrint('🗑️ Bill dismissed: ${widget.bill['name']} in direction: $direction');
+          // Set deleting state to prevent multiple dismissals
+          setState(() {
+            widget.bill['_isDeleting'] = true;
+          });
+          // Call delete callback
+          widget.onDelete(billIndex);
         },
         child: Card(
           elevation: 3,
@@ -157,13 +174,13 @@ class BillItemWidget extends StatelessWidget {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(
-                              _getCategoryIcon(bill['category']),
+                              _getCategoryIcon(widget.bill['category']),
                               size: 14,
                               color: Colors.grey[700],
                             ),
                             const SizedBox(width: 4),
                             Text(
-                              _getCategoryName(bill['category']),
+                              _getCategoryName(widget.bill['category']),
                               style: GoogleFonts.poppins(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w500,
@@ -207,7 +224,7 @@ class BillItemWidget extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              bill['name'] ?? 'Unknown Bill',
+                              widget.bill['name'] ?? 'Unknown Bill',
                               style: GoogleFonts.poppins(
                                 fontWeight: FontWeight.w600,
                                 fontSize: 16,
@@ -274,7 +291,7 @@ class BillItemWidget extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           Text(
-                            '\$${_parseAmount(bill['amount']).toStringAsFixed(2)}',
+                            '\$${_parseAmount(widget.bill['amount']).toStringAsFixed(2)}',
                             style: GoogleFonts.poppins(
                               fontWeight: FontWeight.bold,
                               fontSize: 18,
@@ -290,8 +307,8 @@ class BillItemWidget extends StatelessWidget {
                     children: [
                       if (!isPaid) ...[
                         OutlinedButton.icon(
-                          onPressed: bill['_isUpdating'] == true ? null : () => onMarkAsPaid(billIndex),
-                          icon: bill['_isUpdating'] == true
+                          onPressed: widget.bill['_isUpdating'] == true ? null : () => widget.onMarkAsPaid(billIndex),
+                          icon: widget.bill['_isUpdating'] == true
                               ? SizedBox(
                                   width: 14,
                                   height: 14,
@@ -301,7 +318,7 @@ class BillItemWidget extends StatelessWidget {
                                   ),
                                 )
                               : const Icon(Icons.check, size: 14),
-                          label: bill['_isUpdating'] == true ? const Text('Updating...') : const Text('Mark Paid'),
+                          label: widget.bill['_isUpdating'] == true ? const Text('Updating...') : const Text('Mark Paid'),
                           style: OutlinedButton.styleFrom(
                             foregroundColor: Colors.green,
                             side: const BorderSide(color: Colors.green),
@@ -312,12 +329,12 @@ class BillItemWidget extends StatelessWidget {
                         const SizedBox(width: 8),
                       ],
                       OutlinedButton.icon(
-                        onPressed: bill['_isDeleting'] == true || bill['_isUpdating'] == true
+                        onPressed: widget.bill['_isDeleting'] == true || widget.bill['_isUpdating'] == true
                             ? null
-                            : () => useHomeScreenEdit
-                                ? onEdit({...bill, 'originalIndex': bill['index'] ?? 0})
-                                : onEdit(bill),
-                        icon: bill['_isDeleting'] == true
+                            : () => widget.useHomeScreenEdit
+                                ? widget.onEdit({...widget.bill, 'originalIndex': widget.bill['index'] ?? 0})
+                                : widget.onEdit(widget.bill),
+                        icon: widget.bill['_isDeleting'] == true
                             ? SizedBox(
                                 width: 14,
                                 height: 14,
@@ -327,7 +344,7 @@ class BillItemWidget extends StatelessWidget {
                                 ),
                               )
                             : const Icon(Icons.edit, size: 14),
-                        label: bill['_isDeleting'] == true ? const Text('Deleting...') : const Text('Edit'),
+                        label: widget.bill['_isDeleting'] == true ? const Text('Deleting...') : const Text('Edit'),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: Colors.blue,
                           side: const BorderSide(color: Colors.blue),

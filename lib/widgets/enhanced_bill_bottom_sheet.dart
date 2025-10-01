@@ -17,7 +17,8 @@ class EnhancedBillBottomSheet extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  State<EnhancedBillBottomSheet> createState() => _EnhancedBillBottomSheetState();
+  State<EnhancedBillBottomSheet> createState() =>
+      _EnhancedBillBottomSheetState();
 }
 
 class _EnhancedBillBottomSheetState extends State<EnhancedBillBottomSheet>
@@ -152,40 +153,33 @@ class _EnhancedBillBottomSheetState extends State<EnhancedBillBottomSheet>
   }
 
   void _showFrequencyBottomSheet() {
-    BottomSheetService.showFrequencyBottomSheet(
-      context,
-      _selectedFrequency,
-      (frequency) {
-        setState(() {
-          _selectedFrequency = frequency;
-          _frequencyController.text = frequency;
-        });
-      },
-    );
+    BottomSheetService.showFrequencyBottomSheet(context, _selectedFrequency, (
+      frequency,
+    ) {
+      setState(() {
+        _selectedFrequency = frequency;
+        _frequencyController.text = frequency;
+      });
+    });
   }
 
   void _showReminderBottomSheet() {
-    BottomSheetService.showReminderBottomSheet(
-      context,
-      _selectedReminder,
-      (reminder) {
-        setState(() {
-          _selectedReminder = reminder;
-          _reminderController.text = reminder;
-        });
-      },
-    );
+    BottomSheetService.showReminderBottomSheet(context, _selectedReminder, (
+      reminder,
+    ) {
+      setState(() {
+        _selectedReminder = reminder;
+        _reminderController.text = reminder;
+      });
+    });
   }
 
   void _showCategoryBottomSheet() {
-    BottomSheetService.showCategoryBottomSheet(
-      context,
-      (category) {
-        setState(() {
-          _selectedCategory = category;
-        });
-      },
-    );
+    BottomSheetService.showCategoryBottomSheet(context, (category) {
+      setState(() {
+        _selectedCategory = category;
+      });
+    });
   }
 
   @override
@@ -293,11 +287,7 @@ class _EnhancedBillBottomSheetState extends State<EnhancedBillBottomSheet>
                 color: Colors.grey[200],
                 borderRadius: BorderRadius.circular(16),
               ),
-                child: const Icon(
-                  Icons.close,
-                  size: 18,
-                  color: Colors.grey,
-                ),
+              child: const Icon(Icons.close, size: 18, color: Colors.grey),
             ),
           ),
         ],
@@ -311,9 +301,7 @@ class _EnhancedBillBottomSheetState extends State<EnhancedBillBottomSheet>
       decoration: InputDecoration(
         labelText: 'Bill Name',
         hintText: 'Enter bill name',
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         filled: true,
         fillColor: Colors.grey[50],
       ),
@@ -333,9 +321,7 @@ class _EnhancedBillBottomSheetState extends State<EnhancedBillBottomSheet>
         labelText: 'Amount',
         hintText: '0.00',
         prefixText: '\$ ',
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         filled: true,
         fillColor: Colors.grey[50],
       ),
@@ -358,9 +344,7 @@ class _EnhancedBillBottomSheetState extends State<EnhancedBillBottomSheet>
       decoration: InputDecoration(
         labelText: 'Due Date',
         hintText: 'Select due date',
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         filled: true,
         fillColor: Colors.grey[50],
         suffixIcon: const Icon(Icons.calendar_today),
@@ -404,7 +388,9 @@ class _EnhancedBillBottomSheetState extends State<EnhancedBillBottomSheet>
               child: Text(
                 _selectedCategory?.name ?? 'Select Category',
                 style: TextStyle(
-                  color: _selectedCategory != null ? Colors.black87 : Colors.grey[600],
+                  color: _selectedCategory != null
+                      ? Colors.black87
+                      : Colors.grey[600],
                   fontSize: 16,
                 ),
               ),
@@ -447,10 +433,7 @@ class _EnhancedBillBottomSheetState extends State<EnhancedBillBottomSheet>
             Expanded(
               child: Text(
                 'Frequency: $_selectedFrequency',
-                style: const TextStyle(
-                  color: Colors.black87,
-                  fontSize: 16,
-                ),
+                style: const TextStyle(color: Colors.black87, fontSize: 16),
               ),
             ),
             const Icon(Icons.chevron_right, color: Colors.grey),
@@ -476,10 +459,7 @@ class _EnhancedBillBottomSheetState extends State<EnhancedBillBottomSheet>
             Expanded(
               child: Text(
                 'Reminder: $_selectedReminder',
-                style: const TextStyle(
-                  color: Colors.black87,
-                  fontSize: 16,
-                ),
+                style: const TextStyle(color: Colors.black87, fontSize: 16),
               ),
             ),
             const Icon(Icons.chevron_right, color: Colors.grey),
@@ -505,10 +485,7 @@ class _EnhancedBillBottomSheetState extends State<EnhancedBillBottomSheet>
             ),
             child: const Text(
               'Cancel',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
             ),
           ),
         ),

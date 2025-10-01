@@ -15,7 +15,9 @@
       "Bash(\"./gradlew.bat\" --stop)",
       "Bash(taskkill:*)",
       "Bash(cmd:*)",
-      "Bash(\"./gradlew.bat\" clean)"
+      "Bash(\"./gradlew.bat\" clean)",
+      "Bash(cat:*)",
+      "Bash(grep:*)"
     ],
     "deny": [],
     "ask": []
