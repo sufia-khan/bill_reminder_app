@@ -4,18 +4,16 @@ import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:projeckt_k/screens/settings_screen.dart';
 import 'package:projeckt_k/services/subscription_service.dart';
 import 'package:projeckt_k/services/notification_service.dart';
 import 'package:projeckt_k/services/app_lifecycle_manager.dart';
 import 'package:projeckt_k/models/category_model.dart';
-import 'package:projeckt_k/widgets/subtitle_changing.dart';
-import 'package:projeckt_k/widgets/bill_summary_cards.dart';
 import 'package:projeckt_k/widgets/bill_item_widget.dart';
 import 'package:projeckt_k/widgets/category_bills_bottom_sheet.dart';
 import 'package:projeckt_k/widgets/horizontal_category_selector.dart';
 import 'package:projeckt_k/widgets/collapsible_bill_card.dart';
 import 'package:projeckt_k/widgets/summary_information_bar.dart';
+import 'package:projeckt_k/widgets/subtitle_changing.dart';
 import 'package:projeckt_k/screens/add_edit_bill_screen.dart';
 
 // NOTE: this file contains some legacy code paths and conditional branches
@@ -33,7 +31,14 @@ final Color bgUpcomingMuted = HSLColor.fromAHSL(
 ).toColor();
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({Key? key}) : super(key: key);
+  final VoidCallback? onNavigateToSettings;
+  final VoidCallback? onNavigateToReminders;
+
+  const HomeScreen({
+    Key? key,
+    this.onNavigateToSettings,
+    this.onNavigateToReminders,
+  }) : super(key: key);
 
   @override
   HomeScreenState createState() => HomeScreenState();
@@ -43,71 +48,60 @@ class HomeScreenState extends State<HomeScreen>
     with AutomaticKeepAliveClientMixin, TickerProviderStateMixin {
   @override
   bool get wantKeepAlive => true;
+
   // --- state fields (must be inside the State class) ---
   List<Map<String, dynamic>> _bills = [];
   final SubscriptionService _subscriptionService = SubscriptionService();
-  bool _isLoading = false;
-  bool _hasError = false;
-  bool _isOnline = false;
-  bool _isInitialized = false; // Track if initialization is complete
-  DateTime? _lastDataLoadTime; // Track when data was last loaded
-  bool _isBackgroundRefresh = false; // Track if we're doing background refresh
-  bool _isFirstBuild = true; // Track if this is the first build
 
-  // Cached calculations for performance
+  // State variables
+  bool _isLoading = true;
+  bool _hasError = false;
+  bool _isInitialized = false;
+  bool _isOnline = true;
+  bool _isBackgroundRefresh = false;
+  bool _isFirstBuild = true;
+  bool _isAddingBill = false;
+  String? _markingPaidBillId;
+  String selectedCategory = 'all';
+
+  // Cached calculations
   int? _cachedUpcoming7DaysCount;
   double? _cachedUpcoming7DaysTotal;
   double? _cachedThisMonthTotal;
   DateTime? _lastCalculationTime;
-  StreamSubscription<bool>? _connectivitySubscription;
-  final ValueNotifier<bool> _connectivityNotifier = ValueNotifier<bool>(false);
-  Timer? _updateTimer;
-  String selectedCategory = 'all'; // 'all' or specific category id
-  // base sizes for "This Month"
-  double baseBottomAmountFontSize = 14;
-  double baseBottomTextFontSize = 13;
+  DateTime? _lastDataLoadTime;
 
-  // Loading states
-  bool _isAddingBill = false;
-  String? _markingPaidBillId;
+  // Services and subscriptions
+  StreamSubscription<bool>? _connectivitySubscription;
+  ValueNotifier<bool> _connectivityNotifier = ValueNotifier<bool>(true);
+  Timer? _updateTimer;
   AppLifecycleManager? _appLifecycleManager;
+
+  // Add bill bottom sheet
+  String? _bottomSheetAnimationState;
+
   @override
   void initState() {
     super.initState();
-
-    // Initialize app lifecycle manager for sync on background/close
-    _appLifecycleManager = AppLifecycleManager(_subscriptionService);
-    WidgetsBinding.instance.addObserver(_appLifecycleManager!);
-
-    // If we have data, never show loading or reinitialize
-    if (_bills.isNotEmpty && _isInitialized) {
-      _isLoading = false;
-      return;
-    }
-
-    // Only initialize on first run
-    if (!_isInitialized) {
-      _isLoading = _bills.isEmpty; // Only show loading if no data
-      _initializeApp();
-    }
+    _initializeApp();
   }
 
-  // Centralized initialization sequence called from initState
   Future<void> _initializeApp() async {
-    if (!mounted) return;
     try {
-      // Initialize dependent services
+      // Initialize services first
       await _initServices();
 
-      // Sync any pending local changes from previous sessions
-      await _syncPendingBillsOnStartup();
-
-      // Load local data quickly for immediate UI responsiveness
+      // Load data
       await _loadFromLocalStorageOnly();
 
-      // Set up connectivity and periodic background updates
+      // Set up connectivity
       _setupConnectivityListener();
+
+      // Start periodic updates
       _startPeriodicUpdates();
+
+      // Sync pending bills on startup
+      await _syncPendingBillsOnStartup();
 
       // Mark initialization finished
       _isInitialized = true;
@@ -198,7 +192,7 @@ class HomeScreenState extends State<HomeScreen>
     }
 
     // NEVER trigger any loading when activating - just silent background sync if needed
-    if (_isInitialized && _bills.isNotEmpty) {
+    if (_isInitialized && _bills.isNotEmpty && mounted) {
       // Only do silent background sync, never show any loading
       _isBackgroundRefresh = true;
       _silentBackgroundSync();
@@ -215,6 +209,8 @@ class HomeScreenState extends State<HomeScreen>
 
   // Update cached calculations for better performance
   void _updateCachedCalculations() {
+    if (!mounted || !_isInitialized) return;
+
     if (_bills.isEmpty) {
       _cachedUpcoming7DaysCount = 0;
       _cachedUpcoming7DaysTotal = 0.0;
@@ -331,7 +327,7 @@ class HomeScreenState extends State<HomeScreen>
       final dueDate = _parseDueDate(bill);
       final now = DateTime.now();
 
-      if (bill['status'] == 'paid') {
+      if (bill['status']?.toString() == 'paid') {
         // Keep paid status
         bill['status'] = 'paid';
       } else if (dueDate != null && dueDate.isBefore(now)) {
@@ -366,7 +362,7 @@ class HomeScreenState extends State<HomeScreen>
         final dueDate = _parseDueDate(bill);
         String newStatus = bill['status'] ?? '';
 
-        if (bill['status'] == 'paid') {
+        if (bill['status']?.toString() == 'paid') {
           // Keep paid status
           newStatus = 'paid';
         } else if (dueDate != null && dueDate.isBefore(now)) {
@@ -388,7 +384,7 @@ class HomeScreenState extends State<HomeScreen>
         final billName = bill['name'] ?? 'Unknown';
         debugPrint('Error initializing bill status for bill "$billName": $e');
         // Default to upcoming if there's an error
-        if (bill['status'] != 'paid') {
+        if (bill['status']?.toString() != 'paid') {
           bill['status'] = 'upcoming';
           needsUpdate = true;
         }
@@ -414,7 +410,7 @@ class HomeScreenState extends State<HomeScreen>
 
         final dueDate = _parseDueDate(bill);
         if (dueDate != null &&
-            bill['status'] != 'paid' &&
+            bill['status']?.toString() != 'paid' &&
             dueDate.isBefore(now) &&
             bill['status'] != 'overdue') {
           // Mark bill as overdue
@@ -956,8 +952,14 @@ class HomeScreenState extends State<HomeScreen>
       _updateCachedCalculations();
     });
 
+    // Get the correct bill ID using the helper function
+    final billId = _getBillId(billData);
+    if (billId == null) {
+      throw Exception('Bill ID is required for update');
+    }
+
     // Save to local storage
-    await _subscriptionService.updateSubscription(billData['id'], billData);
+    await _subscriptionService.updateSubscription(billId, billData);
 
     // Update reminders
     await _updateBillReminders(billData);
@@ -1286,7 +1288,7 @@ class HomeScreenState extends State<HomeScreen>
       // Schedule new reminder if needed
       if (bill['reminder'] != null &&
           bill['reminder'] != 'No reminder' &&
-          bill['status'] != 'paid') {
+          bill['status']?.toString() != 'paid') {
         final dueDateTime = _parseDueDate(bill);
         if (dueDateTime != null) {
           final billId = bill['id'] != null
@@ -1588,7 +1590,7 @@ class HomeScreenState extends State<HomeScreen>
           if ((dueDate.isAtSameMomentAs(now) || dueDate.isAfter(now)) &&
               (dueDate.isAtSameMomentAs(sevenDaysFromNow) ||
                   dueDate.isBefore(sevenDaysFromNow)) &&
-              bill['status'] != 'paid') {
+              bill['status']?.toString() != 'paid') {
             count++;
           }
         }
@@ -1613,7 +1615,7 @@ class HomeScreenState extends State<HomeScreen>
           if ((dueDate.isAtSameMomentAs(now) || dueDate.isAfter(now)) &&
               (dueDate.isAtSameMomentAs(sevenDaysFromNow) ||
                   dueDate.isBefore(sevenDaysFromNow)) &&
-              bill['status'] != 'paid') {
+              bill['status']?.toString() != 'paid') {
             final amount =
                 double.tryParse(bill['amount']?.toString() ?? '0') ?? 0.0;
             total += amount;
@@ -1639,7 +1641,7 @@ class HomeScreenState extends State<HomeScreen>
         if (dueDate != null &&
             dueDate.month == currentMonth &&
             dueDate.year == currentYear &&
-            bill['status'] != 'paid') {
+            bill['status']?.toString() != 'paid') {
           final amount =
               double.tryParse(bill['amount']?.toString() ?? '0') ?? 0.0;
           total += amount;
@@ -1653,6 +1655,7 @@ class HomeScreenState extends State<HomeScreen>
 
   // Cached getter methods for instant access
   int _getUpcoming7DaysCount() {
+    if (!mounted || !_isInitialized) return 0;
     if (_cachedUpcoming7DaysCount == null || _shouldRecalculate()) {
       _updateCachedCalculations();
     }
@@ -1660,6 +1663,7 @@ class HomeScreenState extends State<HomeScreen>
   }
 
   double _getUpcoming7DaysTotal() {
+    if (!mounted || !_isInitialized) return 0.0;
     if (_cachedUpcoming7DaysTotal == null || _shouldRecalculate()) {
       _updateCachedCalculations();
     }
@@ -1667,6 +1671,7 @@ class HomeScreenState extends State<HomeScreen>
   }
 
   double _getThisMonthTotal() {
+    if (!mounted || !_isInitialized) return 0.0;
     if (_cachedThisMonthTotal == null || _shouldRecalculate()) {
       _updateCachedCalculations();
     }
@@ -1678,12 +1683,22 @@ class HomeScreenState extends State<HomeScreen>
 
     // Only recalculate if bills have changed or it's been more than 1 minute
     final now = DateTime.now();
-    return now.difference(_lastCalculationTime!) > const Duration(minutes: 1);
+    return _lastCalculationTime != null && now.difference(_lastCalculationTime!) > const Duration(minutes: 1);
   }
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
+
+    // Safety check - don't build if widget is not properly initialized
+    if (!mounted || (_isLoading && !_isInitialized)) {
+      return const Scaffold(
+        backgroundColor: Colors.white,
+        body: Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
 
     // Make status bar transparent so our gradient shows behind it
     SystemChrome.setSystemUIOverlayStyle(
@@ -1705,10 +1720,10 @@ class HomeScreenState extends State<HomeScreen>
     }
 
     // ------------ tuning values (adjust these to change overlap) ------------
-    const double cardHeight = 140.0;
-    final double cardOverlap = cardHeight / 2.2; // less overlap (was /2)
-    const double headerInnerHeight = 130.0; // a little taller (was 110)
-    const double headerBottomPadding = 25.0; // more padding (was 24)
+    const double cardHeight = 110.0; // Increased from 100.0 to allow more space
+    final double cardOverlap = cardHeight / 2.0; // Exactly half overlap - blue header covers half of summary cards
+    const double headerInnerHeight = 100.0; // Reduced from 130.0
+    const double headerBottomPadding = 25.0; // Increased to ensure subtitle is visible
     // -----------------------------------------------------------------------
 
     final double topPadding = MediaQuery.of(context).padding.top;
@@ -1726,79 +1741,118 @@ class HomeScreenState extends State<HomeScreen>
     const double sharedBottom = 48;
 
     return Scaffold(
-      // draw body behind the status bar so gradient can extend into that area
       extendBodyBehindAppBar: true,
       backgroundColor: Colors.white,
-      body: Stack(
-        children: [
-          // Gradient header covering the very top (including status bar area)
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: Container(
-              height: headerTotalHeight,
-              padding: EdgeInsets.only(
-                top: topPadding + 16,
-                left: 16,
-                right: 16,
-                bottom: headerBottomPadding,
-              ),
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    Color(0xFF2563EB), // blue-600
-                    Color(0xFF7C3AED), // purple-600
-                  ],
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'SubManager',
-                    style: GoogleFonts.montserrat(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 22,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  const Text(
-                    'Never miss a due date again',
-                    style: TextStyle(color: Colors.white70, fontSize: 13),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          // Main scrollable content pushed down so cards overlap the headerTotalHeight by cardOverlap
-          Positioned.fill(
-            child: ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: EdgeInsets.only(top: contentPaddingTop, bottom: 48),
+      body: SafeArea(
+        top: false,
+        bottom: true,
+        child: Column(
+          children: [
+            // Fixed header and summary cards section
+            Column(
               children: [
-                // Summary Cards Row (white elevated cards)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Expanded(
-                    child: Row(
+                  // Gradient header (fixed)
+                  Container(
+                    height: headerTotalHeight,
+                    padding: EdgeInsets.only(
+                      top: topPadding + 16,
+                      left: 16,
+                      right: 16,
+                      bottom: headerBottomPadding,
+                    ),
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [Color(0xFF1E40AF), Color(0xFF7C3AED)], // Darker blue for better coverage
+                      ),
+                    ),
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'SubManager',
+                                    style: GoogleFonts.montserrat(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 22,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  const ChangingSubtitle(),
+                                ],
+                              ),
+                            ),
+                            Row(
+                              children: [
+                                // Bell icon for reminders
+                                GestureDetector(
+                                  onTap: widget.onNavigateToReminders,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withValues(alpha: 0.2),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: const Icon(
+                                      Icons.notifications_outlined,
+                                      color: Colors.white,
+                                      size: 24,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                // Profile icon for settings
+                                GestureDetector(
+                                  onTap: widget.onNavigateToSettings,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withValues(alpha: 0.2),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: const Icon(
+                                      Icons.person_outline,
+                                      color: Colors.white,
+                                      size: 24,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Translate the cards upwards so they overlap the header visually
+                  Transform.translate(
+                    offset: Offset(0, -cardOverlap),
+                    child: Column(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
                           child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              // ---------- This Month Card ----------
                               Expanded(
                                 child: Container(
-                                  height: 120,
-                                  margin: const EdgeInsets.only(
-                                    left: 5,
-                                    right: 5,
+                                  constraints: BoxConstraints(
+                                    minHeight: cardHeight,
+                                    maxHeight: cardHeight + 10,
                                   ),
+                                  margin: const EdgeInsets.only(right: 8),
                                   padding: const EdgeInsets.all(14),
                                   decoration: BoxDecoration(
                                     color: Colors.white,
@@ -1812,61 +1866,59 @@ class HomeScreenState extends State<HomeScreen>
                                     ],
                                   ),
                                   child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    mainAxisAlignment: MainAxisAlignment
-                                        .start, // no spaceBetween
+                                    crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       Row(
                                         children: [
-                                          Icon(
-                                            Icons.calendar_month,
-                                            color: Colors.blue,
-                                            size: 20,
+                                          Container(
+                                            padding: const EdgeInsets.all(3),
+                                            decoration: BoxDecoration(
+                                              color: Colors.blue.withValues(alpha: 0.15),
+                                              borderRadius: BorderRadius.circular(6),
+                                              border: Border.all(color: Colors.blue.withValues(alpha: 0.3), width: 1),
+                                            ),
+                                            child: Icon(Icons.calendar_month, color: Colors.blue, size: 18),
                                           ),
                                           const SizedBox(width: 6),
-                                          Text(
-                                            "This Month",
-                                            style: TextStyle(
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w600,
+                                          Expanded(
+                                            child: Text('This Month',
+                                              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                                              overflow: TextOverflow.ellipsis,
                                             ),
                                           ),
                                         ],
                                       ),
                                       const SizedBox(height: 6),
-                                      Text(
-                                        "\$${_calculateMonthlyTotal().toStringAsFixed(2)}",
-                                        style: TextStyle(
-                                          fontSize: 20,
-                                          color: Colors.black,
-
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 6),
-                                      Flexible(
+                                      Expanded(
                                         child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.center,
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          mainAxisSize: MainAxisSize.min,
                                           children: [
                                             Text(
-                                              "${_calculateMonthlyDifference().abs().toStringAsFixed(2)}",
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.w600,
-                                                color: Colors.grey[800],
-                                              ),
+                                              '\$${_calculateMonthlyTotal().toStringAsFixed(2)}',
+                                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
                                             ),
-                                            Text(
-                                              _calculateMonthlyDifference() > 0
-                                                  ? "more than last month"
-                                                  : "less than last month",
-                                              style: TextStyle(
-                                                fontSize: 10,
-                                                color: Colors.grey[600],
+                                            const SizedBox(height: 4),
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Text(
+                                                    _calculateMonthlyDifference().abs().toStringAsFixed(2),
+                                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey[800]),
+                                                    maxLines: 1,
+                                                    overflow: TextOverflow.ellipsis,
+                                                  ),
+                                                  Text(
+                                                    _calculateMonthlyDifference() > 0 ? 'more than last month' : 'less than last month',
+                                                    style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                                                    maxLines: 1,
+                                                    overflow: TextOverflow.ellipsis,
+                                                  ),
+                                                ],
                                               ),
                                             ),
                                           ],
@@ -1876,69 +1928,76 @@ class HomeScreenState extends State<HomeScreen>
                                   ),
                                 ),
                               ),
-
-                              // ---------- Next 7 Days Card ----------
                               Expanded(
                                 child: Container(
-                                  height: 120, // fixed equal height
-                                  margin: const EdgeInsets.only(
-                                    right: 5,
-                                    left: 5,
+                                  constraints: BoxConstraints(
+                                    minHeight: cardHeight,
+                                    maxHeight: cardHeight + 10,
                                   ),
+                                  margin: const EdgeInsets.only(left: 8),
                                   padding: const EdgeInsets.all(14),
                                   decoration: BoxDecoration(
                                     color: Colors.white,
                                     borderRadius: BorderRadius.circular(16),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black12,
-                                        blurRadius: 8,
-                                        offset: Offset(0, 4),
-                                      ),
-                                    ],
+                                    boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, 4))],
                                   ),
                                   child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    mainAxisAlignment: MainAxisAlignment
-                                        .start, // no spaceBetween
+                                    crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       Row(
                                         children: [
-                                          Icon(
-                                            Icons.schedule,
-                                            color: Colors.purple,
-                                            size: 20,
+                                          Container(
+                                            padding: const EdgeInsets.all(3),
+                                            decoration: BoxDecoration(
+                                              color: Colors.purple.withValues(alpha: 0.15),
+                                              borderRadius: BorderRadius.circular(6),
+                                              border: Border.all(color: Colors.purple.withValues(alpha: 0.3), width: 1),
+                                            ),
+                                            child: Icon(Icons.schedule, color: Colors.purple, size: 18),
                                           ),
                                           const SizedBox(width: 6),
-                                          Text(
-                                            "Next 7 Days",
-                                            style: TextStyle(
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w600,
+                                          Expanded(
+                                            child: Text('Next 7 Days',
+                                              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                                              overflow: TextOverflow.ellipsis,
                                             ),
                                           ),
                                         ],
                                       ),
                                       const SizedBox(height: 6),
-                                      Text(
-                                        "\$${_calculateThisMonthTotal().toStringAsFixed(2)}",
-                                        style: TextStyle(
-                                          fontSize: 20,
-                                          color: Colors.black,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 10),
-                                      Flexible(
-                                        child: Text(
-                                          "${_calculateUpcoming7DaysCount()} bills",
-                                          style: TextStyle(
-                                            fontSize: 20,
-                                            color: Colors.grey[600],
-                                          ),
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Text(
+                                              '\$${_getUpcoming7DaysTotal().toStringAsFixed(2)}',
+                                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Text(
+                                                    '${_calculateUpcoming7DaysCount()} bills',
+                                                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey[700]),
+                                                    maxLines: 1,
+                                                    overflow: TextOverflow.ellipsis,
+                                                  ),
+                                                  Text(
+                                                    'upcoming this week',
+                                                    style: TextStyle(fontSize: 9, color: Colors.grey[600]),
+                                                    maxLines: 1,
+                                                    overflow: TextOverflow.ellipsis,
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ),
                                     ],
@@ -1948,51 +2007,57 @@ class HomeScreenState extends State<HomeScreen>
                             ],
                           ),
                         ),
+
+                        const SizedBox(height: 24),
                       ],
                     ),
                   ),
-                ),
+                ],
+              ),
 
-                // spacing so next content isn't jammed under cards
-                SizedBox(height: cardOverlap - 12),
-
-                // Categories + summary bar (unchanged)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: HorizontalCategorySelector(
-                    categories: Category.defaultCategories,
-                    selectedCategory: selectedCategory,
-                    onCategorySelected: (category) {
-                      setState(() {
-                        selectedCategory = category;
-                      });
-                    },
-                    totalBills: _bills.length,
-                    getCategoryBillCount: _getCategoryBillCount,
+            // Scrollable content section (from bills list onwards)
+            Expanded(
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: EdgeInsets.only(bottom: 16),
+                children: [
+                  // Category selector (now scrollable)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: HorizontalCategorySelector(
+                      categories: Category.defaultCategories,
+                      selectedCategory: selectedCategory,
+                      onCategorySelected: (category) {
+                        setState(() {
+                          selectedCategory = category;
+                        });
+                      },
+                      totalBills: _bills.length,
+                      getCategoryBillCount: _getCategoryBillCount,
+                    ),
                   ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: SummaryInformationBar(
-                    billCount: _getFilteredBillCount(),
-                    totalAmount: _getFilteredTotalAmount(),
+
+                  // Summary information bar (now scrollable)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: SummaryInformationBar(
+                      billCount: _getFilteredBillCount(),
+                      totalAmount: _getFilteredTotalAmount(),
+                    ),
                   ),
-                ),
 
-                const SizedBox(height: 8),
+                  const SizedBox(height: 8),
 
-                Container(
-                  constraints: BoxConstraints(
-                    minHeight: MediaQuery.of(context).size.height * 0.4,
+                  // Bills list content
+                  Container(
+                    constraints: BoxConstraints(minHeight: MediaQuery.of(context).size.height * 0.4),
+                    child: _buildFilteredBillsContent(),
                   ),
-                  child: _buildFilteredBillsContent(),
-                ),
-
-                const SizedBox(height: 48),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -2200,6 +2265,8 @@ class HomeScreenState extends State<HomeScreen>
       physics: const NeverScrollableScrollPhysics(),
       itemBuilder: (context, index) {
         final bill = filteredBills[index];
+        if (bill == null) return const SizedBox.shrink();
+
         // Find the original index in _bills for proper editing/deletion
         final originalIndex = _bills.indexWhere(
           (b) =>
@@ -2207,6 +2274,9 @@ class HomeScreenState extends State<HomeScreen>
               b['firebaseId'] == bill['firebaseId'] ||
               b['localId'] == bill['localId'],
         );
+
+        if (originalIndex == -1) return const SizedBox.shrink();
+
         return _buildBillCard(bill, originalIndex);
       },
     );
@@ -2217,14 +2287,17 @@ class HomeScreenState extends State<HomeScreen>
         ? Category.findById(bill['category'].toString())
         : null;
 
+    // Ensure we have the correct bill data from the original _bills list
+    final correctBill = index >= 0 && index < _bills.length ? _bills[index] : bill;
+
     return CollapsibleBillCard(
-      bill: bill,
+      bill: correctBill,
       index: index,
       category: category,
       onMarkAsPaid: (billIndex) async {
         bool? confirm = await _showMarkAsPaidConfirmDialog(
           context,
-          bill['name']?.toString() ?? 'this bill',
+          correctBill['name']?.toString() ?? 'this bill',
         );
         if (confirm == true) {
           await _markBillAsPaid(billIndex);
@@ -2248,7 +2321,7 @@ class HomeScreenState extends State<HomeScreen>
     Map<String, dynamic> bill,
     int index,
   ) {
-    final isPaid = bill['status'] == 'paid';
+    final isPaid = bill['status']?.toString() == 'paid';
     final isOverdue =
         _parseDueDate(bill)?.isBefore(DateTime.now()) == true && !isPaid;
 
@@ -4652,7 +4725,7 @@ class HomeScreenState extends State<HomeScreen>
           // Validate amount (should be a positive number if present)
           final hasValidAmount =
               bill['amount'] == null ||
-              (bill['amount'] is num && bill['amount'] >= 0) ||
+              (bill['amount'] is num && (bill['amount'] as num) >= 0) ||
               (double.tryParse(bill['amount'].toString()) != null &&
                   double.parse(bill['amount'].toString()) >= 0);
 

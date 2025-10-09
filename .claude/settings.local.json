@@ -17,7 +17,8 @@
       "Bash(cmd:*)",
       "Bash(\"./gradlew.bat\" clean)",
       "Bash(cat:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

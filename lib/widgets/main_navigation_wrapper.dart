@@ -8,7 +8,7 @@ import 'package:projeckt_k/services/sync_notification_service.dart';
 class MainNavigationWrapper extends StatefulWidget {
   final SyncNotificationService? syncService;
 
-  const MainNavigationWrapper({Key? key, this.syncService}) : super(key: key);
+  const MainNavigationWrapper({super.key, this.syncService});
 
   @override
   State<MainNavigationWrapper> createState() => _MainNavigationWrapperState();
@@ -35,7 +35,19 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
   }
 
   late final List<Widget> _screens = [
-    HomeScreen(key: _homeScreenKey),
+    HomeScreen(
+      key: _homeScreenKey,
+      onNavigateToSettings: () => setState(() => _currentIndex = 4),
+      onNavigateToReminders: () {
+        // TODO: Navigate to reminder screen when implemented
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Reminder screen coming soon!'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      },
+    ),
     AnalyticsScreen(),
     Container(), // Placeholder for index 2 (Add Bill - uses bottom sheet)
     AllBillsScreen(),
@@ -65,7 +77,7 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
           ),
           boxShadow: [
             BoxShadow(
-              color: _iconGradientColors.first.withOpacity(0.18),
+              color: _iconGradientColors.first.withValues(alpha: 0.18),
               blurRadius: 18,
               spreadRadius: 1,
               offset: const Offset(0, 6),
@@ -104,7 +116,7 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
                   shape: BoxShape.circle,
                   boxShadow: [
                     BoxShadow(
-                      color: _iconGradientColors.first.withOpacity(0.25),
+                      color: _iconGradientColors.first.withValues(alpha: 0.25),
                       blurRadius: 16,
                       spreadRadius: 2,
                       offset: const Offset(0, 6),
@@ -139,7 +151,7 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
               borderRadius: BorderRadius.circular(12),
               border: isActive
                   ? Border.all(
-                      color: _iconGradientColors.first.withOpacity(0.45),
+                      color: _iconGradientColors.first.withValues(alpha: 0.45),
                       width: 1.2,
                     )
                   : null,

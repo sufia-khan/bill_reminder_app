@@ -15,26 +15,26 @@ class BillSummaryCard extends StatelessWidget {
     this.secondaryText,
 
     // Box section heights
-    this.topBoxHeight = 2,
-    this.middleBoxHeight = 12,
-    this.bottomBoxHeight = 6,
+    this.topBoxHeight = 1.2,
+    this.middleBoxHeight = 7,
+    this.bottomBoxHeight = 3,
 
     // Font sizes
-    this.primaryFontSize = 20,
+    this.primaryFontSize = 12,
     this.minPrimaryFontSize = 8,
-    this.bottomAmountFontSize = 6,
+    this.bottomAmountFontSize = 7,
     this.bottomTextFontSize = 6,
     this.minBottomFontSize = 5,
 
-    this.innerPadding = const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+    this.innerPadding = const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
 
     // Icon configs
-    this.iconSize = 16,
+    this.iconSize = 14,
     this.iconOnRight = false,
-    this.textIconGap = 4,
+    this.textIconGap = 3,
 
     // NEW → extra boost for bottom box only
-    this.bottomHeightBoost = 4,
+    this.bottomHeightBoost = 1,
   }) : assert(gradientColors.length >= 2),
        super(key: key);
 
@@ -66,33 +66,23 @@ class BillSummaryCard extends StatelessWidget {
   Widget _topRow() {
     final isWhiteCard = gradientColors.every((color) => color == Colors.white);
 
-    final iconWidget = Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: isWhiteCard ? HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor().withValues(alpha: 0.1) : Colors.white.withOpacity(0.15),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Icon(icon, color: isWhiteCard ? HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor() : Colors.white, size: iconSize),
+    final iconWidget = Icon(
+      icon,
+      color: isWhiteCard ? HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor() : Colors.white,
+      size: iconSize,
     );
 
-    final titleWidget = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: isWhiteCard ? Colors.grey.shade100 : Colors.white.withOpacity(0.18),
-        borderRadius: BorderRadius.circular(10),
+    final titleWidget = AutoSizeText(
+      title,
+      textAlign: TextAlign.left,
+      style: GoogleFonts.poppins(
+        color: isWhiteCard ? const Color(0xFF374151) : Colors.white,
+        fontSize: 10,
+        fontWeight: FontWeight.w700,
       ),
-      child: AutoSizeText(
-        title,
-        textAlign: TextAlign.left,
-        style: GoogleFonts.poppins(
-          color: isWhiteCard ? Colors.grey.shade700 : Colors.white,
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-        ),
-        maxLines: 1,
-        minFontSize: 8,
-        overflow: TextOverflow.ellipsis,
-      ),
+      maxLines: 1,
+      minFontSize: 8,
+      overflow: TextOverflow.ellipsis,
     );
 
     return Row(
@@ -119,12 +109,13 @@ class BillSummaryCard extends StatelessWidget {
             textAlign: TextAlign.left,
             style: GoogleFonts.poppins(
               fontSize: bottomAmountFontSize,
-              fontWeight: FontWeight.bold,
-              color: isWhiteCard ? Colors.grey.shade700 : Colors.white,
+              fontWeight: FontWeight.w800, // Extra bold for important amounts
+              color: isWhiteCard ? const Color(0xFF111827) : Colors.white, // Changed to near-black
             ),
             maxLines: 1,
             minFontSize: minBottomFontSize,
             overflow: TextOverflow.ellipsis,
+            stepGranularity: 0.5,
           ),
           AutoSizeText(
             secondaryText!,
@@ -137,6 +128,7 @@ class BillSummaryCard extends StatelessWidget {
             maxLines: 1,
             minFontSize: minBottomFontSize,
             overflow: TextOverflow.ellipsis,
+            stepGranularity: 0.5,
           ),
         ],
       );
@@ -154,12 +146,13 @@ class BillSummaryCard extends StatelessWidget {
         textAlign: TextAlign.left,
         style: GoogleFonts.poppins(
           fontSize: bottomAmountFontSize,
-          fontWeight: hasAmount ? FontWeight.bold : FontWeight.w600,
-          color: isWhiteCard ? (hasAmount ? Colors.grey.shade700 : Colors.grey.shade500) : (hasAmount ? Colors.white : Colors.white70),
+          fontWeight: hasAmount ? FontWeight.w800 : FontWeight.w600, // Extra bold for amounts
+          color: isWhiteCard ? (hasAmount ? const Color(0xFF111827) : const Color(0xFF6B7280)) : (hasAmount ? Colors.white : Colors.white70), // Near-black for amounts
         ),
         maxLines: 1,
         minFontSize: minBottomFontSize,
         overflow: TextOverflow.ellipsis,
+        stepGranularity: 0.5,
       ),
     );
   }
@@ -167,7 +160,7 @@ class BillSummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isWhiteCard = gradientColors.every((color) => color == Colors.white);
-    const double netScale = 0.75 * 0.75; // more compact scaling
+    const double netScale = 0.7 * 0.7; // even more compact scaling
 
     final double topH = topBoxHeight * netScale;
     final double midH = middleBoxHeight * netScale;
@@ -181,7 +174,7 @@ class BillSummaryCard extends StatelessWidget {
     );
 
     final double perSidePad = math.max(
-      12.0,
+      8.0,
       math.max(
         math.max(scaledInnerPadding.left, scaledInnerPadding.top),
         math.max(scaledInnerPadding.right, scaledInnerPadding.bottom),
@@ -192,16 +185,16 @@ class BillSummaryCard extends StatelessWidget {
     final bool hasAmount = (secondaryAmount?.trim().isNotEmpty ?? false);
     final bool hasText = (secondaryText?.trim().isNotEmpty ?? false);
 
-    const double lineHeightFactor = 1.25;
+    const double lineHeightFactor = 1.15;
     double requiredBottomH;
     if (hasAmount && hasText) {
       requiredBottomH =
-          (bottomAmountFontSize + bottomTextFontSize) * lineHeightFactor + 2.0;
+          (bottomAmountFontSize + bottomTextFontSize) * lineHeightFactor + 1.0;
     } else if (hasAmount || hasText) {
       final double used = (hasAmount
           ? bottomAmountFontSize
           : bottomTextFontSize);
-      requiredBottomH = used * lineHeightFactor + 2.0;
+      requiredBottomH = used * lineHeightFactor + 1.0;
     } else {
       requiredBottomH = 0.0;
     }
@@ -211,7 +204,7 @@ class BillSummaryCard extends StatelessWidget {
     // 🔹 add boost only to bottom box
     bottomH += bottomHeightBoost;
 
-    const double safeBuffer = 1.0;
+    const double safeBuffer = 0.5;
     final double totalHeight =
         topH +
         midH +
@@ -236,14 +229,16 @@ class BillSummaryCard extends StatelessWidget {
                 primaryValue,
                 textAlign: TextAlign.left,
                 style: GoogleFonts.poppins(
-                  color: isWhiteCard ? Colors.grey.shade900 : Colors.white,
+                  color: isWhiteCard ? const Color(0xFF111827) : Colors.white, // Changed to near-black for better contrast
                   fontSize: primaryFontSize,
-                  fontWeight: FontWeight.w700, // Slightly bolder for modern look
-                  letterSpacing: -0.5, // Slight letter spacing for premium feel
+                  fontWeight: FontWeight.w800, // Extra bold for important text
+                  letterSpacing: -0.25, // Improved letter spacing
                 ),
                 maxLines: 1,
                 minFontSize: minPrimaryFontSize,
                 overflow: TextOverflow.ellipsis,
+                stepGranularity: 0.5,
+                presetFontSizes: [primaryFontSize, primaryFontSize - 2, primaryFontSize - 4, minPrimaryFontSize],
               ),
             ),
           ),
@@ -254,7 +249,7 @@ class BillSummaryCard extends StatelessWidget {
                 return Align(
                   alignment: Alignment.centerLeft,
                   child: Padding(
-                    padding: const EdgeInsets.only(right: 4.0),
+                    padding: const EdgeInsets.only(right: 2.0),
                     child: _buildBottom(constraints.maxWidth),
                   ),
                 );
@@ -271,8 +266,8 @@ class BillSummaryCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         onTap: () {}, // Placeholder for future interaction
         splashFactory: InkRipple.splashFactory,
-        splashColor: Colors.white.withOpacity(0.1),
-        highlightColor: Colors.white.withOpacity(0.05),
+        splashColor: Colors.white.withValues(alpha: 0.1),
+        highlightColor: Colors.white.withValues(alpha: 0.05),
         child: Container(
           height: totalHeight,
           padding: finalInnerPadding,
@@ -293,14 +288,14 @@ class BillSummaryCard extends StatelessWidget {
             boxShadow: [
               BoxShadow(
                 color: isWhiteCard
-                  ? Colors.grey.shade300.withOpacity(0.3)
+                  ? Colors.grey.shade300.withValues(alpha: 0.3)
                   : gradientColors.first.withValues(alpha: 0.15), // Increased opacity for better shadow
                 blurRadius: 12, // Increased blur for softer shadow
                 offset: const Offset(0, 6), // Slightly increased offset
               ),
               BoxShadow(
                 color: isWhiteCard
-                  ? Colors.grey.shade200.withOpacity(0.1)
+                  ? Colors.grey.shade200.withValues(alpha: 0.1)
                   : gradientColors.first.withValues(alpha: 0.05), // Additional subtle shadow
                 blurRadius: 20,
                 offset: const Offset(0, 2),

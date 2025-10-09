@@ -20,7 +20,7 @@ class Category {
     Category(
       id: 'subscription',
       name: 'Subscription',
-      icon: Icons.credit_card,
+      icon: Icons.subscriptions,
       color: const Color(0xFF5E35B1),
       backgroundColor: const Color(0xFFE8EAF6),
     ),
@@ -49,8 +49,8 @@ class Category {
       id: 'utilities',
       name: 'Utilities',
       icon: Icons.power,
-      color: const Color(0xFF616161),
-      backgroundColor: const Color(0xFFFAFAFA),
+      color: const Color(0xFFFF9800),
+      backgroundColor: const Color(0xFFFFF3E0),
     ),
     Category(
       id: 'insurance',
@@ -90,7 +90,7 @@ class Category {
     Category(
       id: 'health',
       name: 'Health',
-      icon: Icons.local_hospital,
+      icon: Icons.medical_services,
       color: const Color(0xFF0288D1),
       backgroundColor: const Color(0xFFE1F5FE),
     ),
@@ -105,8 +105,8 @@ class Category {
       id: 'other',
       name: 'Other',
       icon: Icons.more_horiz,
-      color: const Color(0xFF616161),
-      backgroundColor: const Color(0xFFFAFAFA),
+      color: const Color(0xFF607D8B),
+      backgroundColor: const Color(0xFFECEFF1),
     ),
   ];
 

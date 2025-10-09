@@ -3,6 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:projeckt_k/models/category_model.dart';
 
+// Primary color matching the summary cards
+final Color kPrimaryColor = HSLColor.fromAHSL(1.0, 236, 0.89, 0.65).toColor();
+
 class HorizontalCategorySelector extends StatefulWidget {
   final List<Category> categories;
   final String selectedCategory;
@@ -11,13 +14,13 @@ class HorizontalCategorySelector extends StatefulWidget {
   final int Function(String) getCategoryBillCount;
 
   const HorizontalCategorySelector({
-    Key? key,
+    super.key,
     required this.categories,
     required this.selectedCategory,
     required this.onCategorySelected,
     required this.totalBills,
     required this.getCategoryBillCount,
-  }) : super(key: key);
+  });
 
   @override
   State<HorizontalCategorySelector> createState() =>
@@ -43,15 +46,13 @@ class _HorizontalCategorySelectorState
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Title
           Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 16,
-            ).copyWith(bottom: 8),
+            padding: const EdgeInsets.only(bottom: 8),
             child: Text(
               'Categories',
               style: GoogleFonts.inter(
@@ -113,28 +114,6 @@ class _HorizontalCategorySelectorState
     
   }
 
-  double _computeTileWidth(String label, bool isSelected) {
-    // Base text style used in the pill
-    final textStyle = GoogleFonts.inter(
-      fontSize: isSelected ? 12 : 12,
-      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-    );
-
-    final tp = TextPainter(
-      text: TextSpan(text: label, style: textStyle),
-      maxLines: 1,
-      textDirection: TextDirection.ltr,
-    )..layout();
-
-    // Add padding: when selected we show an icon on the left, so add more
-    final extra = isSelected ? 44.0 : 20.0; // icon + spacing vs only padding
-    final minWidth = 64.0;
-    final maxWidth = 180.0;
-
-    final computed = tp.width + extra;
-    return computed.clamp(minWidth, maxWidth);
-  }
-
   Widget _buildCategoryPill(
     BuildContext context,
     String label,
@@ -179,7 +158,7 @@ class _HorizontalCategorySelectorState
         curve: Curves.easeInOut,
         decoration: BoxDecoration(
           color: isSelected
-              ? (categoryId == 'all' ? Colors.blue[600] : (categoryColor ?? Colors.blue[600]))
+              ? (categoryId == 'all' ? kPrimaryColor : (categoryColor ?? kPrimaryColor))
               : Colors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
@@ -189,7 +168,7 @@ class _HorizontalCategorySelectorState
           boxShadow: isSelected
               ? [
                   BoxShadow(
-                    color: (categoryId == 'all' ? Colors.blue[600]! : (categoryColor ?? Colors.blue[600]!)).withValues(alpha: 0.3),
+                    color: (categoryId == 'all' ? kPrimaryColor : (categoryColor ?? kPrimaryColor)).withValues(alpha: 0.3),
                     blurRadius: 8,
                     offset: const Offset(0, 4),
                   ),
@@ -244,17 +223,17 @@ class _HorizontalCategorySelectorState
         return Icons.movie;
       case 'food':
         return Icons.restaurant;
-      case 'transportation':
+      case 'transport':
         return Icons.directions_car;
-      case 'healthcare':
+      case 'health':
         return Icons.medical_services;
       case 'education':
         return Icons.school;
       case 'shopping':
         return Icons.shopping_bag;
       case 'insurance':
-        return Icons.security;
-      case 'subscriptions':
+        return Icons.health_and_safety;
+      case 'subscription':
         return Icons.subscriptions;
       case 'other':
         return Icons.more_horiz;

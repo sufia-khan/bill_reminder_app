@@ -24,8 +24,42 @@ class BillItemWidget extends StatefulWidget {
   State<BillItemWidget> createState() => _BillItemWidgetState();
 }
 
-class _BillItemWidgetState extends State<BillItemWidget> {
+class _BillItemWidgetState extends State<BillItemWidget>
+    with SingleTickerProviderStateMixin {
   Map<String, dynamic> get bill => widget.bill;
+  late AnimationController _animationController;
+  late Animation<double> _expandAnimation;
+  bool _isExpanded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _expandAnimation = CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeInOut,
+    );
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
+
+  void _toggleExpand() {
+    setState(() {
+      _isExpanded = !_isExpanded;
+      if (_isExpanded) {
+        _animationController.forward();
+      } else {
+        _animationController.reverse();
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -47,7 +81,7 @@ class _BillItemWidgetState extends State<BillItemWidget> {
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
-                color: Colors.red.withOpacity(0.3),
+                color: Colors.red.withValues(alpha: 0.3),
                 blurRadius: 8,
                 offset: const Offset(0, 2),
               ),
@@ -78,7 +112,7 @@ class _BillItemWidgetState extends State<BillItemWidget> {
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
-                color: Colors.red.withOpacity(0.3),
+                color: Colors.red.withValues(alpha: 0.3),
                 blurRadius: 8,
                 offset: const Offset(0, 2),
               ),
@@ -126,16 +160,16 @@ class _BillItemWidgetState extends State<BillItemWidget> {
           widget.onDelete(billIndex);
         },
         child: Card(
-          elevation: 3,
-          shadowColor: Colors.black.withOpacity(0.1),
+          elevation: _isExpanded ? 12 : 8,
+          shadowColor: Colors.black.withValues(alpha: _isExpanded ? 0.25 : 0.2),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(_isExpanded ? 16 : 16),
             side: BorderSide(
               color: isPaid
-                  ? Colors.green.withOpacity(0.3)
+                  ? Colors.green.withValues(alpha: 0.3)
                   : (isOverdue
-                        ? Colors.red.withOpacity(0.3)
-                        : Colors.orange.withOpacity(0.3)),
+                        ? Colors.red.withValues(alpha: 0.3)
+                        : Colors.orange.withValues(alpha: 0.3)),
               width: 1,
             ),
           ),
@@ -146,22 +180,44 @@ class _BillItemWidgetState extends State<BillItemWidget> {
               boxShadow: [
                 BoxShadow(
                   color: isPaid
-                      ? Colors.green.withOpacity(0.08)
+                      ? Colors.green.withValues(alpha: 0.15)
                       : (isOverdue
-                            ? Colors.red.withOpacity(0.08)
-                            : Colors.orange.withOpacity(0.08)),
-                  blurRadius: 12,
+                            ? Colors.red.withValues(alpha: 0.15)
+                            : Colors.orange.withValues(alpha: 0.15)),
+                  blurRadius: 16,
                   spreadRadius: 1,
-                  offset: const Offset(0, 2),
+                  offset: const Offset(0, 0),
+                ),
+                BoxShadow(
+                  color: isPaid
+                      ? Colors.green.withValues(alpha: 0.1)
+                      : (isOverdue
+                            ? Colors.red.withValues(alpha: 0.1)
+                            : Colors.orange.withValues(alpha: 0.1)),
+                  blurRadius: 24,
+                  spreadRadius: -2,
+                  offset: const Offset(0, 0),
+                ),
+                BoxShadow(
+                  color: isPaid
+                      ? Colors.green.withValues(alpha: 0.05)
+                      : (isOverdue
+                            ? Colors.red.withValues(alpha: 0.05)
+                            : Colors.orange.withValues(alpha: 0.05)),
+                  blurRadius: 32,
+                  spreadRadius: -4,
+                  offset: const Offset(0, 0),
                 ),
               ],
             ),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Category Row
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                  // Category Row with Status
                   Row(
                     children: [
                       Container(
@@ -176,7 +232,7 @@ class _BillItemWidgetState extends State<BillItemWidget> {
                             Icon(
                               _getCategoryIcon(widget.bill['category']),
                               size: 14,
-                              color: Colors.grey[700],
+                              color: _getCategoryColor(widget.bill['category']),
                             ),
                             const SizedBox(width: 4),
                             Text(
@@ -191,6 +247,7 @@ class _BillItemWidgetState extends State<BillItemWidget> {
                         ),
                       ),
                       const Spacer(),
+                      // Only show status once, in the category row
                       Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 8,
@@ -215,90 +272,93 @@ class _BillItemWidgetState extends State<BillItemWidget> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  // Main Content Row
+                  const SizedBox(height: 8),
+                  // Bill name and amount row
                   Row(
                     children: [
                       Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              widget.bill['name'] ?? 'Unknown Bill',
-                              style: GoogleFonts.poppins(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 16,
-                                color: Colors.black87,
-                              ),
+                        child: Text(
+                          widget.bill['name'] ?? 'Unknown Bill',
+                          style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 16,
+                            color: Colors.black87,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      // Expand/Collapse button
+                      GestureDetector(
+                        onTap: _toggleExpand,
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: _isExpanded
+                                ? (isPaid
+                                    ? Colors.green.withValues(alpha: 0.1)
+                                    : (isOverdue
+                                        ? Colors.red.withValues(alpha: 0.1)
+                                        : Colors.orange.withValues(alpha: 0.1)))
+                                : Colors.grey[100],
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: _isExpanded
+                                  ? (isPaid
+                                      ? Colors.green.withValues(alpha: 0.3)
+                                      : (isOverdue
+                                          ? Colors.red.withValues(alpha: 0.3)
+                                          : Colors.orange.withValues(alpha: 0.3)))
+                                  : Colors.grey[300]!,
+                              width: 1,
                             ),
-                            const SizedBox(height: 6),
-                            Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(6),
-                                  decoration: BoxDecoration(
-                                    color: isPaid
-                                        ? Colors.green.withOpacity(0.1)
-                                        : (isOverdue
-                                              ? Colors.red.withOpacity(0.1)
-                                              : Colors.orange.withOpacity(0.1)),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Icon(
-                                    isPaid
-                                        ? Icons.check_circle
-                                        : (isOverdue ? Icons.error : Icons.access_time),
-                                    color: isPaid
-                                        ? Colors.green
-                                        : (isOverdue ? Colors.red : Colors.orange),
-                                    size: 16,
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Icon(
-                                            Icons.calendar_today,
-                                            size: 12,
-                                            color: Colors.grey[600],
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            dueDate != null
-                                                ? _formatDate(dueDate)
-                                                : 'No due date',
-                                            style: TextStyle(
-                                              fontSize: 11,
-                                              color: Colors.grey[600],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
+                          ),
+                          child: Icon(
+                            _isExpanded
+                                ? Icons.keyboard_arrow_up
+                                : Icons.keyboard_arrow_down,
+                            color: _isExpanded
+                                ? (isPaid
+                                    ? Colors.green
+                                    : (isOverdue
+                                        ? Colors.red
+                                        : Colors.orange))
+                                : Colors.grey[700],
+                            size: 20,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 12),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text(
-                            '\$${_parseAmount(widget.bill['amount']).toStringAsFixed(2)}',
-                            style: GoogleFonts.poppins(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 18,
-                              color: Colors.black87,
-                            ),
-                          ),
-                        ],
+                      Text(
+                        '\$${_parseAmount(widget.bill['amount']).toStringAsFixed(2)}',
+                        style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                          color: Colors.black87,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  // Date row (moved below category and above buttons)
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.calendar_today,
+                        size: 12,
+                        color: Colors.grey[600],
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        dueDate != null
+                            ? _formatDate(dueDate)
+                            : 'No due date',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[600],
+                        ),
                       ),
                     ],
                   ),
@@ -357,10 +417,177 @@ class _BillItemWidgetState extends State<BillItemWidget> {
                 ],
               ),
             ),
+
+            // Expandable section
+            SizeTransition(
+              sizeFactor: _expandAnimation,
+              child: _buildExpandedContent(),
+            ),
+          ],
+        ),
+      ),
+    )));
+  }
+
+  Widget _buildExpandedContent() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: const BorderRadius.only(
+          bottomLeft: Radius.circular(16),
+          bottomRight: Radius.circular(16),
+        ),
+        border: Border(
+          top: BorderSide(
+            color: Colors.grey[300]!,
+            width: 1,
           ),
         ),
       ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Bill Details',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: Colors.black87,
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // Details list
+          _buildDetailRow(
+            'Reminder',
+            widget.bill['reminder']?.toString() ?? 'No reminder',
+            Icons.notifications,
+          ),
+          _buildDetailRow(
+            'Frequency',
+            _getFrequencyText(widget.bill['frequency']?.toString()),
+            Icons.repeat,
+          ),
+          _buildDetailRow(
+            'Payment Method',
+            widget.bill['paymentMethod']?.toString() ?? 'Not specified',
+            Icons.credit_card,
+          ),
+          if (widget.bill['notes']?.toString().isNotEmpty == true)
+            _buildDetailRow(
+              'Notes',
+              widget.bill['notes']?.toString() ?? '',
+              Icons.note,
+            ),
+
+          const SizedBox(height: 12),
+
+          // Delete button in expanded section
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: widget.bill['_isDeleting'] == true || widget.bill['_isUpdating'] == true
+                  ? null
+                  : () async {
+                      bool? confirm = await _showDeleteConfirmDialog(context, widget.bill);
+                      if (confirm == true) {
+                        widget.onDelete(widget.bill['index'] ?? 0);
+                      }
+                    },
+              icon: widget.bill['_isDeleting'] == true
+                  ? SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.red),
+                      ),
+                    )
+                  : const Icon(Icons.delete, size: 14),
+              label: widget.bill['_isDeleting'] == true ? const Text('Deleting...') : const Text('Delete Bill'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red,
+                side: const BorderSide(color: Colors.red),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
+  }
+
+  Widget _buildDetailRow(String label, String value, IconData icon) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: Colors.blue.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              icon,
+              size: 16,
+              color: Colors.blue[700],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: Colors.grey[600],
+                  ),
+                ),
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _getFrequencyText(String? frequency) {
+    switch (frequency?.toLowerCase()) {
+      case 'weekly':
+        return 'Weekly';
+      case 'bi-weekly':
+      case 'biweekly':
+        return 'Bi-weekly';
+      case 'monthly':
+        return 'Monthly';
+      case 'quarterly':
+        return 'Quarterly';
+      case 'semi-annual':
+      case 'semiannual':
+        return 'Semi-annual';
+      case 'annual':
+      case 'yearly':
+        return 'Annual';
+      case 'one-time':
+        return 'One-time';
+      default:
+        return 'Not specified';
+    }
   }
 
   DateTime? _parseDueDate(Map<String, dynamic> bill) {
@@ -401,6 +628,15 @@ class _BillItemWidgetState extends State<BillItemWidget> {
       return cat?.icon ?? Icons.more_horiz;
     }
     return Icons.more_horiz;
+  }
+
+  Color _getCategoryColor(dynamic category) {
+    if (category == null) return const Color(0xFF607D8B);
+    if (category is String) {
+      final cat = Category.findById(category);
+      return cat?.color ?? const Color(0xFF607D8B);
+    }
+    return const Color(0xFF607D8B);
   }
 
   double _parseAmount(dynamic amount) {
