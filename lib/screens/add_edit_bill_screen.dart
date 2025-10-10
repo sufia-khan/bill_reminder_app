@@ -2,17 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:projeckt_k/models/category_model.dart';
 import 'package:intl/intl.dart';
+import 'package:projeckt_k/services/subscription_service.dart';
 
 class AddEditBillScreen extends StatefulWidget {
   final Map<String, dynamic>? bill;
   final int? editIndex;
   final Function(Map<String, dynamic>, int?) onBillSaved;
+  final SubscriptionService subscriptionService;
 
   const AddEditBillScreen({
     Key? key,
     this.bill,
     this.editIndex,
     required this.onBillSaved,
+    required this.subscriptionService,
   }) : super(key: key);
 
   @override
@@ -516,58 +519,64 @@ class _AddEditBillScreenState extends State<AddEditBillScreen> {
   }
 
   Widget _buildDateSelector() {
-    return InkWell(
+    return TextFormField(
+      controller: _dueDateController,
+      readOnly: true,
       onTap: _selectDate,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-        decoration: BoxDecoration(
-          border: Border.all(color: Colors.grey[300]!),
+      validator: (value) {
+        if (value == null || value.trim().isEmpty) {
+          return 'Please select a due date';
+        }
+        return null;
+      },
+      style: GoogleFonts.poppins(
+        fontSize: 16,
+        color: Colors.black87,
+      ),
+      decoration: InputDecoration(
+        labelText: 'Due Date',
+        hintText: 'Select date',
+        hintStyle: GoogleFonts.poppins(
+          fontSize: 14,
+          color: Colors.grey[400],
+        ),
+        prefixIcon: Container(
+          width: 40,
+          height: 40,
+          margin: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.green.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: const Icon(
+            Icons.calendar_today,
+            color: Colors.green,
+            size: 20,
+          ),
+        ),
+        suffixIcon: Icon(Icons.chevron_right, color: Colors.grey[400]),
+        border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          color: Colors.grey[50],
+          borderSide: BorderSide(color: Colors.grey[300]!),
         ),
-        child: Row(
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: Colors.green.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(
-                Icons.calendar_today,
-                color: Colors.green,
-                size: 20,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Due Date',
-                    style: GoogleFonts.poppins(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.grey[600],
-                    ),
-                  ),
-                  Text(
-                    _dueDateController.text.isEmpty ? 'Select date' : _dueDateController.text,
-                    style: GoogleFonts.poppins(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                      color: _dueDateController.text.isEmpty ? Colors.grey[400] : Colors.black87,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Icon(Icons.chevron_right, color: Colors.grey[400]),
-          ],
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey[300]!),
         ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Theme.of(context).primaryColor),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Colors.red),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Colors.red),
+        ),
+        filled: true,
+        fillColor: Colors.grey[50],
       ),
     );
   }
@@ -1039,6 +1048,144 @@ class _AddEditBillScreenState extends State<AddEditBillScreen> {
     );
   }
 
+  // Check for duplicate bills before saving
+  Future<bool> _checkForDuplicateBill() async {
+    final billName = _nameController.text.trim().toLowerCase();
+    final billAmount = _amountController.text.trim();
+    final billCategory = _selectedCategory.id;
+    final billDueDate = _selectedDate;
+
+    if (billName.isEmpty || billAmount.isEmpty) return false;
+
+    // Get all existing bills to check for duplicates
+    final existingBills = await widget.subscriptionService.getSubscriptions();
+
+    // Check for duplicates (excluding current bill if editing)
+    for (final bill in existingBills) {
+      // Skip current bill if editing
+      if (widget.bill != null &&
+          (bill['id'] == widget.bill!['id'] ||
+           bill['localId'] == widget.bill!['localId'] ||
+           bill['firebaseId'] == widget.bill!['firebaseId'])) {
+        continue;
+      }
+
+      final existingName = bill['name']?.toString().toLowerCase().trim() ?? '';
+      final existingAmount = bill['amount']?.toString() ?? '';
+      final existingCategory = bill['category']?.toString();
+      final existingDueDate = bill['dueDate'] != null ? DateTime.tryParse(bill['dueDate']) : null;
+
+      // Check if this is a potential duplicate
+      bool isDuplicate = false;
+
+      // Exact match: name + amount + category + due date
+      if (existingName == billName &&
+          existingAmount == billAmount &&
+          existingCategory == billCategory &&
+          _isSameDay(existingDueDate, billDueDate)) {
+        isDuplicate = true;
+      }
+      // Partial match: name + amount (most common duplicate case)
+      else if (existingName == billName && existingAmount == billAmount) {
+        isDuplicate = true;
+      }
+      // Name + category match
+      else if (existingName == billName && existingCategory == billCategory) {
+        isDuplicate = true;
+      }
+
+      if (isDuplicate) {
+        // Show duplicate warning dialog
+        final shouldContinue = await _showDuplicateWarningDialog(
+          existingName,
+          existingAmount,
+          existingCategory,
+          existingDueDate,
+        );
+
+        if (shouldContinue == false) {
+          return true; // User chose not to continue
+        }
+      }
+    }
+
+    return false; // No duplicates found or user chose to continue
+  }
+
+  // Helper method to check if two dates are the same day
+  bool _isSameDay(DateTime? date1, DateTime? date2) {
+    if (date1 == null || date2 == null) return date1 == null && date2 == null;
+    return date1.year == date2.year &&
+           date1.month == date2.month &&
+           date1.day == date2.day;
+  }
+
+  // Show duplicate warning dialog
+  Future<bool?> _showDuplicateWarningDialog(
+    String existingName,
+    String existingAmount,
+    String? existingCategory,
+    DateTime? existingDueDate,
+  ) async {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber, color: Colors.orange, size: 24),
+            SizedBox(width: 8),
+            Text('Duplicate Bill Detected'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'A similar bill already exists:',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            SizedBox(height: 8),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Name: $existingName', style: TextStyle(fontWeight: FontWeight.w500)),
+                  Text('Amount: \$$existingAmount'),
+                  if (existingCategory != null)
+                    Text('Category: ${existingCategory}'),
+                  if (existingDueDate != null)
+                    Text('Due Date: ${existingDueDate.month}/${existingDueDate.day}/${existingDueDate.year}'),
+                ],
+              ),
+            ),
+            SizedBox(height: 12),
+            Text(
+              'Do you want to continue adding this bill anyway?',
+              style: TextStyle(fontSize: 14),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.orange),
+            child: Text('Continue Anyway'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _saveBill() async {
     if (!_formKey.currentState!.validate()) {
       return;
@@ -1049,6 +1196,15 @@ class _AddEditBillScreenState extends State<AddEditBillScreen> {
     });
 
     try {
+      // Check for duplicate bills before saving
+      final isDuplicate = await _checkForDuplicateBill();
+      if (isDuplicate) {
+        setState(() {
+          _isLoading = false;
+        });
+        return; // User cancelled due to duplicate
+      }
+
       final billData = {
         'name': _nameController.text.trim(),
         'amount': double.tryParse(_amountController.text) ?? 0.0,

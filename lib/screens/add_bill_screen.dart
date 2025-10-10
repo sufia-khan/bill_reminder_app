@@ -73,7 +73,28 @@ class _AddBillScreenState extends State<AddBillScreen> {
   }
 
   Future<void> _saveBill() async {
+    // Manual validation for due date since it's a read-only field
+    if (_dueDateController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Due date is required'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
+    // Validate form and show errors
     if (!_formKey.currentState!.validate()) {
+      // Shake animation to indicate validation errors
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please fill in all required fields marked with *'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 3),
+        ),
+      );
       return;
     }
 
@@ -117,9 +138,16 @@ class _AddBillScreenState extends State<AddBillScreen> {
       }
     } catch (e) {
       if (mounted) {
+        String errorMessage = 'Failed to ${_isEditing ? 'update' : 'add'} bill. Please try again.';
+
+        // Check for specific duplicate error
+        if (e.toString().contains('already exists')) {
+          errorMessage = 'A bill with the same name, amount, and due date already exists.';
+        }
+
         DialogService.showErrorSnackBar(
           context,
-          'Failed to ${_isEditing ? 'update' : 'add'} bill. Please try again.',
+          errorMessage,
         );
       }
     } finally {
@@ -151,18 +179,33 @@ class _AddBillScreenState extends State<AddBillScreen> {
               TextFormField(
                 controller: _nameController,
                 decoration: InputDecoration(
-                  labelText: 'Bill Name',
+                  labelText: 'Bill Name *',
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
                   prefixIcon: const Icon(Icons.description),
+                  hintText: 'Enter bill name',
+                  errorStyle: const TextStyle(color: Colors.red),
+                  errorBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Colors.red, width: 2),
+                  ),
+                  focusedErrorBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Colors.red, width: 2),
+                  ),
                 ),
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
-                    return 'Please enter bill name';
+                    return 'Bill name is required';
+                  }
+                  if (value.trim().length < 2) {
+                    return 'Bill name must be at least 2 characters';
                   }
                   return null;
                 },
+                textInputAction: TextInputAction.next,
+                onFieldSubmitted: (_) => FocusScope.of(context).nextFocus(),
               ),
               const SizedBox(height: 16),
 
@@ -170,47 +213,77 @@ class _AddBillScreenState extends State<AddBillScreen> {
               TextFormField(
                 controller: _amountController,
                 decoration: InputDecoration(
-                  labelText: 'Amount',
+                  labelText: 'Amount *',
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
                   prefixIcon: const Icon(Icons.attach_money),
+                  hintText: 'Enter amount',
+                  errorStyle: const TextStyle(color: Colors.red),
+                  errorBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Colors.red, width: 2),
+                  ),
+                  focusedErrorBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Colors.red, width: 2),
+                  ),
                 ),
                 keyboardType: TextInputType.numberWithOptions(decimal: true),
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
-                    return 'Please enter amount';
+                    return 'Amount is required';
                   }
                   if (double.tryParse(value) == null) {
                     return 'Please enter a valid amount';
                   }
+                  final amount = double.tryParse(value);
+                  if (amount != null && amount <= 0) {
+                    return 'Amount must be greater than 0';
+                  }
                   return null;
                 },
+                textInputAction: TextInputAction.next,
+                onFieldSubmitted: (_) => FocusScope.of(context).nextFocus(),
               ),
               const SizedBox(height: 16),
 
               // Due Date Field
-              GestureDetector(
-                onTap: _selectDueDate,
-                child: AbsorbPointer(
-                  child: TextFormField(
-                    controller: _dueDateController,
-                    decoration: InputDecoration(
-                      labelText: 'Due Date',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      prefixIcon: const Icon(Icons.calendar_today),
-                      hintText: 'Select due date',
-                    ),
-                    validator: (value) {
-                      if (value == null || value.trim().isEmpty) {
-                        return 'Please select due date';
-                      }
-                      return null;
-                    },
+              TextFormField(
+                controller: _dueDateController,
+                decoration: InputDecoration(
+                  labelText: 'Due Date *',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  prefixIcon: const Icon(Icons.calendar_today),
+                  hintText: 'Select due date',
+                  errorStyle: const TextStyle(color: Colors.red),
+                  errorBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Colors.red, width: 2),
+                  ),
+                  focusedErrorBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Colors.red, width: 2),
                   ),
                 ),
+                readOnly: true,
+                onTap: _selectDueDate,
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return 'Due date is required';
+                  }
+                  try {
+                    final selectedDate = DateTime.parse(value);
+                    if (selectedDate.isBefore(DateTime.now().subtract(const Duration(days: 1)))) {
+                      return 'Due date cannot be in the past';
+                    }
+                  } catch (e) {
+                    return 'Please select a valid due date';
+                  }
+                  return null;
+                },
               ),
               const SizedBox(height: 16),
 

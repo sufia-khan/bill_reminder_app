@@ -10,7 +10,12 @@ import 'package:projeckt_k/services/subscription_service.dart';
 import 'package:projeckt_k/services/auth_service.dart';
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
+  final Function()? onDataCleared;
+
+  const SettingsScreen({
+    super.key,
+    this.onDataCleared,
+  });
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -852,6 +857,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _darkMode = false;
           _currency = 'USD';
           _reminderTime = '09:00';
+        });
+      }
+
+      // Navigate back to home screen and force refresh
+      if (mounted) {
+        // Call the callback to notify home screen
+        widget.onDataCleared?.call();
+
+        // Pop all screens until we reach the home screen
+        Navigator.popUntil(context, (route) => route.isFirst);
+
+        // Force refresh the home screen by showing a message
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Data cleared successfully! Add some bills to get started.'),
+                backgroundColor: Colors.blue,
+                behavior: SnackBarBehavior.floating,
+                duration: Duration(seconds: 3),
+              ),
+            );
+          }
         });
       }
 

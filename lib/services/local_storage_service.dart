@@ -21,17 +21,38 @@ class LocalStorageService {
 
   // Save subscription locally
   Future<void> saveSubscription(Map<String, dynamic> subscription) async {
+    // 🔍 DEBUG: Print incoming subscription data
+    debugPrint('🔍 [LOCAL_STORAGE] Starting saveSubscription...');
+    debugPrint('🔍 [LOCAL_STORAGE] Incoming bill: ${subscription['name']} (Amount: ${subscription['amount']})');
+
     final userId = _getCurrentUserId();
     if (userId == null) {
       throw Exception('User not logged in - cannot save subscription');
     }
 
+    debugPrint('🔍 [LOCAL_STORAGE] User ID: $userId');
     final subscriptions = await getSubscriptions();
+    debugPrint('🔍 [LOCAL_STORAGE] Current subscriptions count: ${subscriptions.length}');
+
+    // 🔍 DEBUG: Print existing subscriptions
+    for (int i = 0; i < subscriptions.length; i++) {
+      final sub = subscriptions[i];
+      debugPrint('🔍 [LOCAL_STORAGE] Existing $i: ${sub['name']} (Amount: ${sub['amount']}, Due: ${sub['dueDate']})');
+    }
+
     subscription['localId'] = DateTime.now().millisecondsSinceEpoch.toString();
+    debugPrint('🔍 [LOCAL_STORAGE] Generated localId: ${subscription['localId']}');
+
     subscription['syncPending'] = true; // Mark as needing sync
     subscription['lastModified'] = DateTime.now().toIso8601String();
+
+    debugPrint('🔍 [LOCAL_STORAGE] Adding subscription to list...');
     subscriptions.add(subscription);
+    debugPrint('🔍 [LOCAL_STORAGE] New subscriptions count: ${subscriptions.length}');
+
+    debugPrint('🔍 [LOCAL_STORAGE] Saving to shared preferences...');
     await _saveSubscriptions(subscriptions, userId);
+    debugPrint('🔍 [LOCAL_STORAGE] saveSubscription completed successfully');
   }
 
   // Get all local subscriptions for current user
@@ -44,9 +65,25 @@ class LocalStorageService {
 
     final subscriptionsKey = _getSubscriptionsKey(userId);
     final subscriptionsJson = _prefs.getString(subscriptionsKey);
-    if (subscriptionsJson == null) return [];
 
+    debugPrint('🔍 [LOCAL_STORAGE] getSubscriptions called for user $userId');
+    debugPrint('🔍 [LOCAL_STORAGE] Subscriptions key: $subscriptionsKey');
+
+    if (subscriptionsJson == null) {
+      debugPrint('🔍 [LOCAL_STORAGE] No subscriptions found in storage');
+      return [];
+    }
+
+    debugPrint('🔍 [LOCAL_STORAGE] Found subscriptions JSON with length: ${subscriptionsJson.length}');
     final List<dynamic> decoded = json.decode(subscriptionsJson);
+    debugPrint('🔍 [LOCAL_STORAGE] Decoded ${decoded.length} subscriptions');
+
+    // Print all retrieved subscriptions
+    for (int i = 0; i < decoded.length; i++) {
+      final sub = decoded[i] as Map<String, dynamic>;
+      debugPrint('🔍 [LOCAL_STORAGE] Retrieved subscription $i: ${sub['name']} (ID: ${sub['localId']}, Amount: ${sub['amount']})');
+    }
+
     return decoded.cast<Map<String, dynamic>>();
   }
 
@@ -97,8 +134,21 @@ class LocalStorageService {
   // Save subscriptions list for specific user
   Future<void> _saveSubscriptions(List<Map<String, dynamic>> subscriptions, String userId) async {
     final subscriptionsKey = _getSubscriptionsKey(userId);
+
+    debugPrint('🔍 [LOCAL_STORAGE] _saveSubscriptions called for user $userId');
+    debugPrint('🔍 [LOCAL_STORAGE] Saving ${subscriptions.length} subscriptions');
+
+    // Print all subscriptions being saved
+    for (int i = 0; i < subscriptions.length; i++) {
+      final sub = subscriptions[i];
+      debugPrint('🔍 [LOCAL_STORAGE] Saving subscription $i: ${sub['name']} (ID: ${sub['localId']}, Amount: ${sub['amount']})');
+    }
+
     final subscriptionsJson = json.encode(subscriptions);
+    debugPrint('🔍 [LOCAL_STORAGE] JSON length: ${subscriptionsJson.length}');
+
     await _prefs.setString(subscriptionsKey, subscriptionsJson);
+    debugPrint('✅ [LOCAL_STORAGE] Successfully saved to shared preferences');
   }
 
   // Public method to save subscriptions (used for fallback updates)

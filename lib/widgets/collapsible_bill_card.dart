@@ -110,10 +110,14 @@ class _CollapsibleBillCardState extends State<CollapsibleBillCard>
   Widget build(BuildContext context) {
     final dueDate = _parseDueDate(widget.bill);
     final now = DateTime.now();
-    final isOverdue = dueDate != null && dueDate.isBefore(now) && widget.bill['status'] != 'paid';
+    final isOverdue =
+        dueDate != null &&
+        dueDate.isBefore(now) &&
+        widget.bill['status'] != 'paid';
     final isPaid = widget.bill['status'] == 'paid';
 
-    final amountText = '\$${_parseAmount(widget.bill['amount']).toStringAsFixed(2)}';
+    final amountText =
+        '\$${_parseAmount(widget.bill['amount']).toStringAsFixed(2)}';
 
     // days remaining text
     String? daysText;
@@ -121,7 +125,8 @@ class _CollapsibleBillCardState extends State<CollapsibleBillCard>
     if (dueDate != null) {
       final diff = dueDate.difference(now).inDays;
       if (widget.bill['status'] == 'paid') {
-        daysText = 'Paid';
+        daysText =
+            null; // Don't show duplicate "Paid" text here - it's already shown in the status badge
         daysColor = Colors.green;
       } else if (diff < 0) {
         final d = diff.abs();
@@ -186,15 +191,21 @@ class _CollapsibleBillCardState extends State<CollapsibleBillCard>
                             width: 64,
                             height: 64,
                             decoration: BoxDecoration(
-                              color: _getCategoryColor(widget.category?.id).withValues(alpha: 0.1),
+                              color: _getCategoryColor(
+                                widget.category?.id,
+                              ).withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(16),
                               border: Border.all(
-                                color: _getCategoryColor(widget.category?.id).withValues(alpha: 0.15),
+                                color: _getCategoryColor(
+                                  widget.category?.id,
+                                ).withValues(alpha: 0.15),
                                 width: 1.5,
                               ),
                               boxShadow: [
                                 BoxShadow(
-                                  color: _getCategoryColor(widget.category?.id).withValues(alpha: 0.08),
+                                  color: _getCategoryColor(
+                                    widget.category?.id,
+                                  ).withValues(alpha: 0.08),
                                   blurRadius: 8,
                                   offset: const Offset(0, 2),
                                 ),
@@ -217,7 +228,8 @@ class _CollapsibleBillCardState extends State<CollapsibleBillCard>
                               children: [
                                 // Bill name
                                 Text(
-                                  widget.bill['name']?.toString() ?? 'Unnamed Bill',
+                                  widget.bill['name']?.toString() ??
+                                      'Unnamed Bill',
                                   style: GoogleFonts.poppins(
                                     fontSize: 17,
                                     fontWeight: FontWeight.w600,
@@ -229,36 +241,37 @@ class _CollapsibleBillCardState extends State<CollapsibleBillCard>
                                 ),
                                 const SizedBox(height: 8),
 
-                                // Category and date row
-                                Row(
-                                  children: [
-                                    // Professional category tag
-                                    Flexible(
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xFFF9FAFB),
-                                          borderRadius: BorderRadius.circular(6),
-                                          border: Border.all(
-                                            color: const Color(0xFFE5E7EB),
-                                            width: 1,
-                                          ),
-                                        ),
-                                        child: Text(
-                                          widget.category?.name ?? 'Uncategorized',
-                                          style: GoogleFonts.poppins(
-                                            fontSize: 9,
-                                            color: const Color(0xFF6B7280),
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
+                                // Category tag
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFF9FAFB),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: const Color(0xFFE5E7EB),
+                                      width: 1,
                                     ),
-                                    const SizedBox(width: 6),
-                                    // Date with icon
-                                    if (dueDate != null) ...[
+                                  ),
+                                  child: Text(
+                                    widget.category?.name ?? 'Uncategorized',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 9,
+                                      color: const Color(0xFF6B7280),
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                // Date with icon below category
+                                if (dueDate != null)
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
                                       const Icon(
                                         Icons.calendar_today_outlined,
                                         size: 11,
@@ -273,9 +286,8 @@ class _CollapsibleBillCardState extends State<CollapsibleBillCard>
                                           fontWeight: FontWeight.w400,
                                         ),
                                       ),
-                                    ]
-                                  ],
-                                ),
+                                    ],
+                                  ),
                               ],
                             ),
                           ),
@@ -292,43 +304,54 @@ class _CollapsibleBillCardState extends State<CollapsibleBillCard>
                               child: Container(
                                 height: 32,
                                 child: ElevatedButton(
-                                  onPressed: widget.bill['_isUpdating'] == true ? null : () async {
-                                    final confirm = await _showMarkAsPaidConfirmDialog(context, widget.bill['name']?.toString() ?? 'this bill');
-                                    if (confirm == true) widget.onMarkAsPaid(widget.index);
-                                  },
+                                  onPressed: widget.bill['_isUpdating'] == true
+                                      ? null
+                                      : () async {
+                                          final confirm =
+                                              await _showMarkAsPaidConfirmDialog(
+                                                context,
+                                                widget.bill['name']
+                                                        ?.toString() ??
+                                                    'this bill',
+                                              );
+                                          if (confirm == true)
+                                            widget.onMarkAsPaid(widget.index);
+                                        },
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: const Color(0xFF4F46E5),
                                     foregroundColor: Colors.white,
                                     elevation: 0,
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(6),
+                                      side: const BorderSide(
+                                        color: Color(0xFF4F46E5),
+                                        width: 1,
+                                      ),
                                     ),
                                     shadowColor: Colors.transparent,
                                   ),
-                                  child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      if (widget.bill['_isUpdating'] == true)
-                                        SizedBox(
-                                          width: 12,
-                                          height: 12,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                  child: Center(
+                                    child: widget.bill['_isUpdating'] == true
+                                        ? SizedBox(
+                                            width: 12,
+                                            height: 12,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              valueColor:
+                                                  AlwaysStoppedAnimation<Color>(
+                                                    Colors.white,
+                                                  ),
+                                            ),
+                                          )
+                                        : const Text(
+                                            'Mark as Paid',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w600,
+                                              letterSpacing: 0.1,
+                                              color: Colors.pink,
+                                            ),
                                           ),
-                                        )
-                                      else
-                                        const Icon(Icons.check_circle, size: 12),
-                                      const SizedBox(width: 4),
-                                      const Text(
-                                        'Mark as Paid',
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w600,
-                                          letterSpacing: 0.1,
-                                        ),
-                                      ),
-                                    ],
                                   ),
                                 ),
                               ),
@@ -339,42 +362,45 @@ class _CollapsibleBillCardState extends State<CollapsibleBillCard>
                             flex: 2,
                             child: Container(
                               height: 32,
-                              child: OutlinedButton(
-                                onPressed: widget.bill['_isDeleting'] == true || widget.bill['_isUpdating'] == true ? null : () => widget.onEdit(widget.index),
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: const Color(0xFF6B7280),
-                                  backgroundColor: Colors.white,
-                                  side: const BorderSide(color: Color(0xFFE5E7EB), width: 1),
+                              child: ElevatedButton(
+                                onPressed:
+                                    widget.bill['_isDeleting'] == true ||
+                                        widget.bill['_isUpdating'] == true
+                                    ? null
+                                    : () => widget.onEdit(widget.index),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF4F46E5),
+                                  foregroundColor: Colors.white,
                                   elevation: 0,
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(6),
                                   ),
                                   shadowColor: Colors.transparent,
                                 ),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    if (widget.bill['_isDeleting'] == true)
-                                      SizedBox(
-                                        width: 12,
-                                        height: 12,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          valueColor: AlwaysStoppedAnimation<Color>(const Color(0xFF6B7280)),
+                                child: Center(
+                                  child:
+                                      widget.bill['_isDeleting'] == true ||
+                                          widget.bill['_isUpdating'] == true
+                                      ? SizedBox(
+                                          width: 12,
+                                          height: 12,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            valueColor:
+                                                AlwaysStoppedAnimation<Color>(
+                                                  const Color(0xFF6B7280),
+                                                ),
+                                          ),
+                                        )
+                                      : const Text(
+                                          'Edit',
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w500,
+                                            letterSpacing: 0.1,
+                                            color: Colors.black,
+                                          ),
                                         ),
-                                      )
-                                    else
-                                      const Icon(Icons.edit_outlined, size: 12),
-                                    const SizedBox(width: 4),
-                                    const Text(
-                                      'Edit',
-                                      style: TextStyle(
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.w500,
-                                        letterSpacing: 0.1,
-                                      ),
-                                    ),
-                                  ],
                                 ),
                               ),
                             ),
@@ -392,35 +418,45 @@ class _CollapsibleBillCardState extends State<CollapsibleBillCard>
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       // Amount
-                      Text(
-                        amountText,
-                        style: GoogleFonts.poppins(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: isOverdue
-                              ? const Color(0xFFDC2626)
-                              : const Color(0xFF111827),
-                          letterSpacing: 0.3,
+                      Tooltip(
+                        message: amountText,
+                        child: Text(
+                          amountText,
+                          style: GoogleFonts.poppins(
+                            fontSize: 16, // Reduced from 18 to fit more text
+                            fontWeight: FontWeight.w700,
+                            color: isOverdue
+                                ? const Color(0xFFDC2626)
+                                : const Color(0xFF111827),
+                            letterSpacing: 0.2,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                       const SizedBox(height: 6),
 
                       // Bill status badge
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
                           color: isPaid
                               ? const Color(0xFF10B981).withValues(alpha: 0.1)
                               : isOverdue
-                                  ? const Color(0xFFEF4444).withValues(alpha: 0.1)
-                                  : const Color(0xFFF59E0B).withValues(alpha: 0.1),
+                              ? const Color(0xFFEF4444).withValues(alpha: 0.1)
+                              : const Color(0xFFF59E0B).withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
                             color: isPaid
                                 ? const Color(0xFF10B981).withValues(alpha: 0.2)
                                 : isOverdue
-                                    ? const Color(0xFFEF4444).withValues(alpha: 0.2)
-                                    : const Color(0xFFF59E0B).withValues(alpha: 0.2),
+                                ? const Color(0xFFEF4444).withValues(alpha: 0.2)
+                                : const Color(
+                                    0xFFF59E0B,
+                                  ).withValues(alpha: 0.2),
                             width: 1,
                           ),
                         ),
@@ -428,16 +464,16 @@ class _CollapsibleBillCardState extends State<CollapsibleBillCard>
                           isPaid
                               ? 'Paid'
                               : isOverdue
-                                  ? 'Overdue'
-                                  : 'Upcoming',
+                              ? 'Overdue'
+                              : 'Upcoming',
                           style: GoogleFonts.poppins(
                             fontSize: 9,
                             fontWeight: FontWeight.w600,
                             color: isPaid
                                 ? const Color(0xFF10B981)
                                 : isOverdue
-                                    ? const Color(0xFFEF4444)
-                                    : const Color(0xFFF59E0B),
+                                ? const Color(0xFFEF4444)
+                                : const Color(0xFFF59E0B),
                             letterSpacing: 0.2,
                           ),
                         ),
@@ -447,7 +483,10 @@ class _CollapsibleBillCardState extends State<CollapsibleBillCard>
                       // Days remaining (if any)
                       if (daysText != null) ...[
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: daysColor.withValues(alpha: 0.08),
                             borderRadius: BorderRadius.circular(8),
@@ -464,7 +503,7 @@ class _CollapsibleBillCardState extends State<CollapsibleBillCard>
                         ),
                         const SizedBox(height: 6),
                       ],
-                      const SizedBox(height: 32),
+                      const SizedBox(height: 0),
 
                       // Expand arrow - aligned with action buttons
                       GestureDetector(
@@ -509,10 +548,7 @@ class _CollapsibleBillCardState extends State<CollapsibleBillCard>
                   bottomRight: Radius.circular(12),
                 ),
                 border: const Border(
-                  top: BorderSide(
-                    color: Color(0xFFE5E7EB),
-                    width: 0.8,
-                  ),
+                  top: BorderSide(color: Color(0xFFE5E7EB), width: 0.8),
                 ),
               ),
               child: Column(
@@ -540,7 +576,9 @@ class _CollapsibleBillCardState extends State<CollapsibleBillCard>
                   ),
                   _buildDetailRow(
                     'Next billing',
-                    dueDate != null ? '${dueDate.month}/${dueDate.day}/${dueDate.year}' : 'Not specified',
+                    dueDate != null
+                        ? '${dueDate.month}/${dueDate.day}/${dueDate.year}'
+                        : 'Not specified',
                     Icons.event_outlined,
                   ),
                   _buildDetailRow(
@@ -553,7 +591,11 @@ class _CollapsibleBillCardState extends State<CollapsibleBillCard>
                     width: double.infinity,
                     height: 36,
                     child: ElevatedButton(
-                      onPressed: widget.bill['_isDeleting'] == true || widget.bill['_isUpdating'] == true ? null : () => widget.onDelete(widget.index),
+                      onPressed:
+                          widget.bill['_isDeleting'] == true ||
+                              widget.bill['_isUpdating'] == true
+                          ? null
+                          : () => widget.onDelete(widget.index),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFFDC2626),
                         foregroundColor: Colors.white,
@@ -572,7 +614,9 @@ class _CollapsibleBillCardState extends State<CollapsibleBillCard>
                               height: 14,
                               child: CircularProgressIndicator(
                                 strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  Colors.white,
+                                ),
                               ),
                             )
                           else
@@ -610,16 +654,9 @@ class _CollapsibleBillCardState extends State<CollapsibleBillCard>
             decoration: BoxDecoration(
               color: const Color(0xFFEEF2FF),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: const Color(0xFFE0E7FF),
-                width: 0.8,
-              ),
+              border: Border.all(color: const Color(0xFFE0E7FF), width: 0.8),
             ),
-            child: Icon(
-              icon,
-              size: 16,
-              color: const Color(0xFF4F46E5),
-            ),
+            child: Icon(icon, size: 16, color: const Color(0xFF4F46E5)),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -653,15 +690,25 @@ class _CollapsibleBillCardState extends State<CollapsibleBillCard>
     );
   }
 
-  Future<bool?> _showMarkAsPaidConfirmDialog(BuildContext context, String billName) async {
+  Future<bool?> _showMarkAsPaidConfirmDialog(
+    BuildContext context,
+    String billName,
+  ) async {
     return showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Mark as Paid'),
         content: Text('Are you sure you want to mark "$billName" as paid?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Mark Paid'), style: TextButton.styleFrom(foregroundColor: Colors.green)),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Mark Paid'),
+            style: TextButton.styleFrom(foregroundColor: Colors.green),
+          ),
         ],
       ),
     );

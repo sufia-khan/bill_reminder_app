@@ -232,7 +232,7 @@ class _BillItemWidgetState extends State<BillItemWidget>
                             Icon(
                               _getCategoryIcon(widget.bill['category']),
                               size: 14,
-                              color: _getCategoryColor(widget.bill['category']),
+                              color: _getVibrantCategoryColor(widget.bill['category']),
                             ),
                             const SizedBox(width: 4),
                             Text(
@@ -630,11 +630,83 @@ class _BillItemWidgetState extends State<BillItemWidget>
     return Icons.more_horiz;
   }
 
+  Color _getVibrantCategoryColor(dynamic category) {
+    // Always return vibrant colors, never grey
+    if (category is String) {
+      switch (category.toLowerCase()) {
+        case 'subscription':
+        case 'subscriptions':
+          return const Color(0xFF5E35B1); // Purple
+        case 'rent':
+          return const Color(0xFF00897B); // Teal
+        case 'internet':
+          return const Color(0xFF1976D2); // Blue
+        case 'education':
+          return const Color(0xFFF57C00); // Orange
+        case 'utilities':
+          return const Color(0xFFFF9800); // Orange
+        case 'insurance':
+          return const Color(0xFFD32F2F); // Red
+        case 'transport':
+        case 'transportation':
+          return const Color(0xFF388E3C); // Green
+        case 'entertainment':
+          return const Color(0xFF7B1FA2); // Purple
+        case 'food':
+          return const Color(0xFFE65100); // Orange
+        case 'shopping':
+          return const Color(0xFFC2185B); // Pink
+        case 'health':
+        case 'healthcare':
+          return const Color(0xFF0288D1); // Light Blue
+        case 'fitness':
+          return const Color(0xFF00796B); // Teal
+        default:
+          return const Color(0xFF5E35B1); // Default purple
+      }
+    }
+    return const Color(0xFF5E35B1); // Default purple, never grey
+  }
+
   Color _getCategoryColor(dynamic category) {
     if (category == null) return const Color(0xFF607D8B);
     if (category is String) {
       final cat = Category.findById(category);
-      return cat?.color ?? const Color(0xFF607D8B);
+      if (cat != null) {
+        return cat.color;
+      }
+      // Fallback colors for specific categories if not found in model
+      switch (category.toLowerCase()) {
+        case 'subscription':
+        case 'subscriptions':
+          return const Color(0xFF5E35B1); // Purple
+        case 'rent':
+          return const Color(0xFF00897B); // Teal
+        case 'internet':
+          return const Color(0xFF1976D2); // Blue
+        case 'education':
+          return const Color(0xFFF57C00); // Orange
+        case 'utilities':
+          return const Color(0xFFFF9800); // Orange
+        case 'insurance':
+          return const Color(0xFFD32F2F); // Red
+        case 'transport':
+        case 'transportation':
+          return const Color(0xFF388E3C); // Green
+        case 'entertainment':
+          return const Color(0xFF7B1FA2); // Purple
+        case 'food':
+          return const Color(0xFFE65100); // Orange
+        case 'shopping':
+          return const Color(0xFFC2185B); // Pink
+        case 'health':
+        case 'healthcare':
+          return const Color(0xFF0288D1); // Light Blue
+        case 'fitness':
+          return const Color(0xFF00796B); // Teal
+        default:
+          return const Color(0xFF5E35B1); // Default purple
+      }
     }
     return const Color(0xFF607D8B);
   }

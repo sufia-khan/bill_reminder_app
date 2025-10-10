@@ -909,6 +909,7 @@ class HomeScreenState extends State<HomeScreen>
           onBillSaved: (updatedBill, editIndex) async {
             await _handleBillSaved(updatedBill, editIndex);
           },
+          subscriptionService: _subscriptionService,
         ),
       ),
     );
@@ -1755,7 +1756,7 @@ class HomeScreenState extends State<HomeScreen>
                   Container(
                     height: headerTotalHeight,
                     padding: EdgeInsets.only(
-                      top: topPadding + 16,
+                      top: topPadding + 8,
                       left: 16,
                       right: 16,
                       bottom: headerBottomPadding,
@@ -2007,13 +2008,13 @@ class HomeScreenState extends State<HomeScreen>
                             ],
                           ),
                         ),
-
-                        const SizedBox(height: 24),
                       ],
                     ),
                   ),
                 ],
               ),
+
+              const SizedBox(height: 5),
 
             // Scrollable content section (from bills list onwards)
             Expanded(
@@ -2287,8 +2288,9 @@ class HomeScreenState extends State<HomeScreen>
         ? Category.findById(bill['category'].toString())
         : null;
 
-    // Ensure we have the correct bill data from the original _bills list
-    final correctBill = index >= 0 && index < _bills.length ? _bills[index] : bill;
+    // Use the bill parameter directly since it's already the correct bill from the filtered list
+    // The index parameter is used for operations like delete/edit, but the bill data should come from the parameter
+    final correctBill = bill;
 
     return CollapsibleBillCard(
       bill: correctBill,
@@ -4411,6 +4413,7 @@ class HomeScreenState extends State<HomeScreen>
           onBillSaved: (billData, editIndex) async {
             Navigator.pop(context, billData);
           },
+          subscriptionService: _subscriptionService,
         ),
       ),
     );
@@ -5668,5 +5671,10 @@ class HomeScreenState extends State<HomeScreen>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), backgroundColor: Colors.red),
     );
+  }
+
+  // Refresh data method for external calls
+  Future<void> refreshData() async {
+    await _loadDataWithSyncPriority();
   }
 }

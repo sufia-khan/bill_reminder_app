@@ -21,8 +21,8 @@ class Category {
       id: 'subscription',
       name: 'Subscription',
       icon: Icons.subscriptions,
-      color: const Color(0xFF5E35B1),
-      backgroundColor: const Color(0xFFE8EAF6),
+      color: const Color(0xFFFF9800),
+      backgroundColor: const Color(0xFFFFF3E0),
     ),
     Category(
       id: 'rent',

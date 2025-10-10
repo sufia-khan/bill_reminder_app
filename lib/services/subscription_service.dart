@@ -19,9 +19,16 @@ class SubscriptionService {
   // Initialize local storage
   Future<void> init() async {
     _localStorageService = await LocalStorageService.init();
+
+    // Check if user is authenticated
     final userId = _auth.currentUser?.uid;
+    debugPrint('🔐 [SUBSCRIPTION_SERVICE] Initializing with user ID: $userId');
+
     if (userId != null) {
       await _localStorageService?.setUserId(userId);
+      debugPrint('✅ [SUBSCRIPTION_SERVICE] User ID set successfully');
+    } else {
+      debugPrint('⚠️ [SUBSCRIPTION_SERVICE] No user ID found - user not authenticated');
     }
   }
 
@@ -36,15 +43,82 @@ class SubscriptionService {
 
   // Add a new subscription with BATCHED Firebase sync
   Future<void> addSubscription(Map<String, dynamic> subscription) async {
+    // 🔍 DEBUG: Print incoming subscription data
+    debugPrint('🔍 [SUBSCRIPTION_SERVICE] Starting addSubscription...');
+    debugPrint('🔍 [SUBSCRIPTION_SERVICE] Incoming bill data: $subscription');
+
+    // Verify user is authenticated
+    final userId = _auth.currentUser?.uid;
+    if (userId == null) {
+      debugPrint('❌ [SUBSCRIPTION_SERVICE] User not authenticated');
+      throw Exception('User not authenticated - please log in again');
+    }
+
+    // Check for duplicate bill before adding
+    debugPrint('🔍 [SUBSCRIPTION_SERVICE] Checking for duplicates...');
+    final existingSubscriptions = await getSubscriptions();
+    debugPrint('🔍 [SUBSCRIPTION_SERVICE] Found ${existingSubscriptions.length} existing subscriptions');
+
+    // 🔍 DEBUG: Print existing subscriptions for comparison
+    for (int i = 0; i < existingSubscriptions.length; i++) {
+      final existing = existingSubscriptions[i];
+      debugPrint('🔍 [SUBSCRIPTION_SERVICE] Existing $i: ${existing['name']} (Amount: ${existing['amount']}, Due: ${existing['dueDate']}, Deleted: ${existing['deleted']})');
+    }
+
+    // Check if a bill with same name, amount, and due date already exists
+    final isDuplicate = existingSubscriptions.any((existing) {
+      final existingName = existing['name']?.toString().toLowerCase() ?? '';
+      final newName = subscription['name']?.toString().toLowerCase() ?? '';
+      final existingAmount = existing['amount']?.toString() ?? '';
+      final newAmount = subscription['amount']?.toString() ?? '';
+      final existingDueDate = existing['dueDate']?.toString() ?? '';
+      final newDueDate = subscription['dueDate']?.toString() ?? '';
+
+      debugPrint('🔍 [SUBSCRIPTION_SERVICE] Comparing: "$existingName" vs "$newName"');
+      debugPrint('🔍 [SUBSCRIPTION_SERVICE] Comparing: "$existingAmount" vs "$newAmount"');
+      debugPrint('🔍 [SUBSCRIPTION_SERVICE] Comparing: "$existingDueDate" vs "$newDueDate"');
+
+      // Also check local ID to avoid comparing the same bill with itself
+      final existingLocalId = existing['localId']?.toString() ?? '';
+      final newLocalId = subscription['localId']?.toString() ?? '';
+
+      // TEMPORARY: Disable duplicate detection for testing
+      debugPrint('🔍 [SUBSCRIPTION_SERVICE] Local IDs: existing=$existingLocalId, new=$newLocalId');
+
+      // Only consider it a duplicate if ALL fields match AND it's not the same bill
+      final isMatch = existingName == newName &&
+                      existingAmount == newAmount &&
+                      existingDueDate == newDueDate &&
+                      existingLocalId != newLocalId && // Don't compare with self
+                      existing['deleted'] != true;
+
+      if (isMatch) {
+        debugPrint('🔍 [SUBSCRIPTION_SERVICE] DUPLICATE FOUND: $existingName matches $newName');
+      }
+
+      return isMatch;
+    });
+
+    debugPrint('🔍 [SUBSCRIPTION_SERVICE] Is duplicate: $isDuplicate');
+
+    if (isDuplicate) {
+      debugPrint('⚠️ Duplicate bill detected, skipping: ${subscription['name']}');
+      throw Exception('A bill with the same name, amount, and due date already exists');
+    }
+
     // Mark as pending sync and save locally
+    debugPrint('🔍 [SUBSCRIPTION_SERVICE] Preparing to save locally...');
     subscription['syncPending'] = true;
     subscription['lastModified'] = DateTime.now().toIso8601String();
+    debugPrint('🔍 [SUBSCRIPTION_SERVICE] Final bill data before saving: $subscription');
 
     await _localStorageService?.saveSubscription(subscription);
     debugPrint('✅ Saved locally and marked for sync');
 
-    // Schedule batch sync instead of immediate sync
-    _scheduleBatchSync();
+    // TEMPORARY: Disable sync to test local storage issue
+    debugPrint('🔍 [SUBSCRIPTION_SERVICE] Skipping sync for testing...');
+    // _scheduleBatchSync();
+    debugPrint('🔍 [SUBSCRIPTION_SERVICE] addSubscription completed successfully');
   }
 
   // Get ONLY Firebase subscriptions (clean data source)
@@ -82,12 +156,19 @@ class SubscriptionService {
   // Get subscriptions from LOCAL storage only (local-first approach)
   Future<List<Map<String, dynamic>>> getSubscriptions() async {
     try {
+      // Check if user is authenticated
+      final userId = _auth.currentUser?.uid;
+      if (userId == null) {
+        debugPrint('⚠️ [SUBSCRIPTION_SERVICE] User not authenticated in getSubscriptions');
+        return [];
+      }
+
       // Get active subscriptions from local storage only
       final localSubscriptions =
           await _localStorageService?.getActiveSubscriptions() ?? [];
 
       debugPrint(
-        '📱 Getting ${localSubscriptions.length} subscriptions from local storage',
+        '📱 Getting ${localSubscriptions.length} subscriptions from local storage for user $userId',
       );
 
       return localSubscriptions.map((sub) {
@@ -95,7 +176,7 @@ class SubscriptionService {
         return sub;
       }).toList();
     } catch (e) {
-      debugPrint('Failed to get local subscriptions: $e');
+      debugPrint('❌ Failed to get local subscriptions: $e');
       return [];
     }
   }
@@ -297,14 +378,15 @@ class SubscriptionService {
 
             debugPrint('📝 Queued update: ${subscription['name']}');
           } else {
-            // DEDUPLICATION CHECK: Look for existing subscription by name and amount
-            final existingSubscription = await _findExistingSubscription(
+            // DEDUPLICATION CHECK: Only prevent exact duplicates by checking localId
+            // This prevents updating wrong bills when names are similar
+            final existingSubscription = await _findExactExistingSubscription(
               subscription,
             );
             if (existingSubscription != null) {
-              // Found existing subscription, update it instead of creating duplicate
+              // Found exact duplicate subscription, update it
               debugPrint(
-                '🔄 Found existing subscription, updating: ${subscription['name']}',
+                '🔄 Found exact duplicate subscription, updating: ${subscription['name']}',
               );
               subscriptionToSync['updatedAt'] = FieldValue.serverTimestamp();
               batch.update(
@@ -393,39 +475,37 @@ class SubscriptionService {
   }
 
   // Find existing subscription to prevent duplicates
-  Future<DocumentSnapshot?> _findExistingSubscription(
+  Future<DocumentSnapshot?> _findExactExistingSubscription(
     Map<String, dynamic> subscription,
   ) async {
     try {
-      final name = subscription['name']?.toString().toLowerCase().trim();
-      final amount = subscription['amount']?.toString();
+      final localId = subscription['localId']?.toString();
       final userId = _auth.currentUser?.uid;
 
-      if (name == null || name.isEmpty || amount == null || userId == null) {
+      if (localId == null || localId.isEmpty || userId == null) {
         return null;
       }
 
-      // Look for subscription with same name and amount for this user
+      // Look for subscription with the same localId (exact duplicate)
       final querySnapshot = await _firestore
           .collection('users')
           .doc(userId)
           .collection('subscriptions')
-          .where('name', isEqualTo: subscription['name'])
-          .where('amount', isEqualTo: amount)
+          .where('localId', isEqualTo: localId)
           .limit(1)
           .get();
 
       if (querySnapshot.docs.isNotEmpty) {
         final existingDoc = querySnapshot.docs.first;
         debugPrint(
-          '🔍 Found existing subscription: ${existingDoc.id} - ${existingDoc['name']}',
+          '🔍 Found exact duplicate subscription: ${existingDoc.id} - ${existingDoc['name']}',
         );
         return existingDoc;
       }
 
       return null;
     } catch (e) {
-      debugPrint('❌ Error checking for existing subscription: $e');
+      debugPrint('❌ Error finding exact existing subscription: $e');
       return null;
     }
   }

@@ -51,7 +51,14 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
     AnalyticsScreen(),
     Container(), // Placeholder for index 2 (Add Bill - uses bottom sheet)
     AllBillsScreen(),
-    SettingsScreen(),
+    SettingsScreen(
+      onDataCleared: () {
+        // Refresh home screen data when cleared
+        _homeScreenKey.currentState?.refreshData();
+        // Switch back to home screen
+        setState(() => _currentIndex = 0);
+      },
+    ),
   ];
   // gradient for icons & active labels
   List<Color> get _iconGradientColors => [
